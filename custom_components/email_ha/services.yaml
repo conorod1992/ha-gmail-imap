@@ -1,49 +1,138 @@
 query_emails:
-  name: Query emails
+  name: Query emails (legacy)
   description: >
-    Search an IMAP folder using standard IMAP search criteria and return
-    matching emails. Use the response variable to access the results in
-    automations or scripts.
+    Backwards-compatible IMAP search action. New automations should use
+    search_emails. Attachment content is never returned.
   fields:
     config_entry_id:
       name: Account
-      description: The email account to query.
+      description: Required when more than one Gmail account is configured.
       required: false
       selector:
         config_entry:
           integration: email_ha
     folder:
       name: Folder
-      description: IMAP folder to search (e.g. INBOX, Sent, Spam).
+      description: IMAP folder to search. UIDs are only valid in this folder.
       default: INBOX
       selector:
         text: {}
     search_criteria:
-      name: Search criteria
+      name: IMAP search criteria
       description: >
-        IMAP search string. Examples: ALL, UNSEEN,
-        FROM user@example.com, SUBJECT "invoice", SINCE 01-Jan-2025.
+        Standard IMAP criteria, not Gmail web search syntax. Examples: ALL,
+        UNSEEN, FROM "person@example.com", SUBJECT "renewal".
       default: ALL
       selector:
         text: {}
     max_results:
       name: Maximum results
-      description: Maximum number of emails to return (1–200).
+      description: Maximum number of newest matching messages to return (1-25).
       default: 10
       selector:
         number:
           min: 1
-          max: 200
+          max: 25
           mode: box
     include_full_body:
-      name: Include full body
-      description: Return the complete plain-text and HTML body. Off by default to keep responses small.
+      name: Include body
+      description: Include bounded readable plain text. May expose private content.
       default: false
       selector:
         boolean: {}
     include_attachments:
-      name: Include attachments
-      description: Return attachments as base64-encoded data with filename, content type, and size. Can produce large responses.
+      name: Include attachment metadata
+      description: >
+        Compatibility field. Attachment bytes are never returned; metadata is
+        available when the message body is parsed.
       default: false
       selector:
         boolean: {}
+
+search_emails:
+  name: Search emails
+  description: >
+    Search a selected Gmail account with standard IMAP criteria and return
+    structured message metadata. Request bodies only when necessary.
+  fields:
+    config_entry_id:
+      name: Account
+      description: Required when more than one Gmail account is configured.
+      required: false
+      selector:
+        config_entry:
+          integration: email_ha
+    folder:
+      name: Folder
+      description: IMAP folder to search. Message UIDs are folder-specific.
+      default: INBOX
+      selector:
+        text: {}
+    search_criteria:
+      name: IMAP search criteria
+      description: >
+        Standard IMAP criteria, not Gmail web search syntax. Examples: ALL,
+        UNSEEN, FROM "person@example.com", SUBJECT "renewal",
+        SINCE 01-Jul-2026.
+      default: ALL
+      selector:
+        text: {}
+    max_results:
+      name: Maximum results
+      description: Maximum number of newest matching messages to return (1-25).
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 25
+          mode: box
+    include_body:
+      name: Include body
+      description: Include bounded readable plain text. Off by default for privacy.
+      default: false
+      selector:
+        boolean: {}
+    body_max_chars:
+      name: Body character limit
+      description: Maximum plain-text body characters per message (1-20000).
+      default: 4000
+      selector:
+        number:
+          min: 1
+          max: 20000
+          mode: box
+
+get_message:
+  name: Get message
+  description: >
+    Retrieve readable content for one message after identifying its UID. The UID
+    belongs to the selected folder and full content may contain private data.
+  fields:
+    config_entry_id:
+      name: Account
+      description: Required when more than one Gmail account is configured.
+      required: false
+      selector:
+        config_entry:
+          integration: email_ha
+    folder:
+      name: Folder
+      description: Folder containing the UID. IMAP UIDs are not global.
+      default: INBOX
+      selector:
+        text: {}
+    uid:
+      name: UID
+      description: Numeric IMAP UID in the selected folder.
+      required: true
+      selector:
+        text: {}
+    body_max_chars:
+      name: Body character limit
+      description: Maximum readable plain-text body characters (1-20000).
+      default: 12000
+      selector:
+        number:
+          min: 1
+          max: 20000
+          mode: box

@@ -1,4 +1,5 @@
 """application_credentials platform for Email IMAP (Gmail)."""
+
 from __future__ import annotations
 
 from homeassistant.components.application_credentials import AuthorizationServer

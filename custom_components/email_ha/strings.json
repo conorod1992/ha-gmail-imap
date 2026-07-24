@@ -54,5 +54,19 @@
         "name": "Last email"
       }
     }
+  },
+  "services": {
+    "query_emails": {
+      "name": "Query emails (legacy)",
+      "description": "Backwards-compatible IMAP search action. New automations should use search emails."
+    },
+    "search_emails": {
+      "name": "Search emails",
+      "description": "Search a selected Gmail account with standard IMAP criteria and return structured message metadata."
+    },
+    "get_message": {
+      "name": "Get message",
+      "description": "Retrieve bounded readable content for a folder-specific message UID."
+    }
   }
 }

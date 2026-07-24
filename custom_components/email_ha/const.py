@@ -1,4 +1,5 @@
 """Constants for the Email IMAP integration."""
+
 from __future__ import annotations
 
 DOMAIN = "email_ha"
@@ -34,10 +35,23 @@ ATTR_FOLDER = "folder"
 
 # Service names
 SERVICE_QUERY_EMAILS = "query_emails"
+SERVICE_SEARCH_EMAILS = "search_emails"
+SERVICE_GET_MESSAGE = "get_message"
 SERVICE_ATTR_FOLDER = "folder"
 SERVICE_ATTR_SEARCH_CRITERIA = "search_criteria"
 SERVICE_ATTR_MAX_RESULTS = "max_results"
 SERVICE_ATTR_INCLUDE_FULL_BODY = "include_full_body"
 SERVICE_ATTR_INCLUDE_ATTACHMENTS = "include_attachments"
+
+DEFAULT_SEARCH_RESULTS = 10
+MAX_SEARCH_RESULTS = 25
+DEFAULT_SEARCH_BODY_CHARS = 4000
+DEFAULT_MESSAGE_BODY_CHARS = 12000
+MAX_BODY_CHARS = 20000
+MAX_SEARCH_CRITERIA_CHARS = 1000
+MAX_SEARCH_TOKENS = 40
+IMAP_TIMEOUT = 30
+MAX_HEADER_BYTES = 65536
+MAX_MESSAGE_BYTES = 2000000
 
 EVENT_NEW_EMAIL = "email_ha_new_email"

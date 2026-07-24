@@ -1,4 +1,5 @@
 """DataUpdateCoordinator for Email IMAP."""
+
 from __future__ import annotations
 
 import asyncio
@@ -57,6 +58,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
 
     def __init__(
         self,
+        *,
         hass: HomeAssistant,
         oauth_session: OAuth2Session,
         email_address: str,
@@ -94,7 +96,6 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         """Return the configured polling interval in seconds."""
         return self._scan_interval
 
-
     async def _async_ensure_fresh_token(self) -> str:
         """Proactively refresh OAuth token and return the access token string."""
         try:
@@ -128,7 +129,6 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         raw = self.oauth_session.token["access_token"]
         return raw.decode() if isinstance(raw, bytes) else str(raw)
 
-
     async def _async_fetch_data(self, client: ImapClient) -> EmailData:
         """Fetch current email state from an already-connected client."""
         status = await client.get_folder_status(self._folder)
@@ -150,7 +150,6 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             folders=self._cached_folders,
         )
 
-
     async def _async_update_data(self) -> EmailData:
         """Short-lived connection poll; fallback when IDLE is not running."""
         access_token = await self._async_ensure_fresh_token()
@@ -171,7 +170,6 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
 
         self._fire_new_email_event(data)
         return data
-
 
     def start_idle(self) -> None:
         """Start the IDLE background task (idempotent)."""
@@ -261,10 +259,14 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                 )
                 push_lines = await client.idle_wait(idle_timeout)
 
-                if push_lines and any(b"EXISTS" in line or b"EXPUNGE" in line for line in push_lines):
+                if push_lines and any(
+                    b"EXISTS" in line or b"EXPUNGE" in line for line in push_lines
+                ):
                     _LOGGER.debug("IDLE push for %s: %s", self._email, push_lines)
                 elif push_lines:
-                    _LOGGER.debug("IDLE push ignored for %s: %s", self._email, push_lines)
+                    _LOGGER.debug(
+                        "IDLE push ignored for %s: %s", self._email, push_lines
+                    )
                 else:
                     _LOGGER.debug("IDLE timeout for %s", self._email)
 
@@ -273,18 +275,29 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         finally:
             await client.disconnect()
 
-
     def _fire_new_email_event(self, data: EmailData) -> None:
         """Fire EVENT_NEW_EMAIL when the latest UID has changed."""
         new_uid = data.latest_uid
         if new_uid and new_uid != self._last_uid:
             if self._last_uid is not None:
+                latest = data.latest_email or {}
                 self.hass.bus.async_fire(
                     EVENT_NEW_EMAIL,
                     {
                         "email_address": self._email,
+                        "account": self._email,
+                        "config_entry_id": (
+                            self.config_entry.entry_id if self.config_entry else None
+                        ),
                         "folder": self._folder,
-                        **(data.latest_email or {}),
+                        "uid": latest.get("uid"),
+                        "message_id": latest.get("message_id"),
+                        "subject": latest.get("subject"),
+                        "sender": latest.get("sender"),
+                        "sender_name": latest.get("sender_name"),
+                        "sender_email": latest.get("sender_email"),
+                        "date": latest.get("date"),
+                        "preview": latest.get("preview", ""),
                     },
                 )
             self._last_uid = new_uid

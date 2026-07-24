@@ -1,4 +1,5 @@
-"""Email IMAP integration for Home Assistant."""
+"""Email HA integration for read-only Gmail IMAP access."""
+
 from __future__ import annotations
 
 import logging
@@ -9,171 +10,327 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady, ServiceValidationError
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    HomeAssistantError,
+    ServiceValidationError,
+)
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.config_entry_oauth2_flow import (
+    ImplementationUnavailableError,
     OAuth2Session,
     async_get_config_entry_implementation,
 )
+from homeassistant.helpers.typing import ConfigType
 
 from .const import (
     CONF_EMAIL,
     CONF_FOLDER,
     CONF_SCAN_INTERVAL,
     DEFAULT_FOLDER,
+    DEFAULT_MESSAGE_BODY_CHARS,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_SEARCH_BODY_CHARS,
+    DEFAULT_SEARCH_RESULTS,
     DOMAIN,
     GMAIL_IMAP_HOST,
     GMAIL_IMAP_PORT,
+    MAX_BODY_CHARS,
+    MAX_SEARCH_RESULTS,
     PLATFORMS,
     SERVICE_ATTR_FOLDER,
     SERVICE_ATTR_INCLUDE_ATTACHMENTS,
     SERVICE_ATTR_INCLUDE_FULL_BODY,
     SERVICE_ATTR_MAX_RESULTS,
     SERVICE_ATTR_SEARCH_CRITERIA,
+    SERVICE_GET_MESSAGE,
     SERVICE_QUERY_EMAILS,
+    SERVICE_SEARCH_EMAILS,
 )
 from .coordinator import EmailDataUpdateCoordinator
-from .imap_client import ImapAuthError, ImapClient
+from .imap_client import (
+    ImapAuthError,
+    ImapClient,
+    ImapClientError,
+    ImapFolderError,
+    ImapMessageNotFoundError,
+    ImapSearchError,
+    tokenize_search_criteria,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
+_ACCOUNT_FIELD = {vol.Optional("config_entry_id"): cv.string}
 QUERY_EMAILS_SCHEMA = vol.Schema(
     {
-        vol.Optional("config_entry_id"): cv.string,
+        **_ACCOUNT_FIELD,
         vol.Optional(SERVICE_ATTR_FOLDER, default=DEFAULT_FOLDER): cv.string,
         vol.Optional(SERVICE_ATTR_SEARCH_CRITERIA, default="ALL"): cv.string,
-        vol.Optional(SERVICE_ATTR_MAX_RESULTS, default=50): vol.All(
-            vol.Coerce(int), vol.Range(min=1, max=200)
+        vol.Optional(SERVICE_ATTR_MAX_RESULTS, default=DEFAULT_SEARCH_RESULTS): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=MAX_SEARCH_RESULTS)
         ),
         vol.Optional(SERVICE_ATTR_INCLUDE_FULL_BODY, default=False): cv.boolean,
         vol.Optional(SERVICE_ATTR_INCLUDE_ATTACHMENTS, default=False): cv.boolean,
     }
 )
+SEARCH_EMAILS_SCHEMA = vol.Schema(
+    {
+        **_ACCOUNT_FIELD,
+        vol.Optional(SERVICE_ATTR_FOLDER, default=DEFAULT_FOLDER): cv.string,
+        vol.Optional(SERVICE_ATTR_SEARCH_CRITERIA, default="ALL"): cv.string,
+        vol.Optional(SERVICE_ATTR_MAX_RESULTS, default=DEFAULT_SEARCH_RESULTS): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=MAX_SEARCH_RESULTS)
+        ),
+        vol.Optional("include_body", default=False): cv.boolean,
+        vol.Optional("body_max_chars", default=DEFAULT_SEARCH_BODY_CHARS): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=MAX_BODY_CHARS)
+        ),
+    }
+)
+GET_MESSAGE_SCHEMA = vol.Schema(
+    {
+        **_ACCOUNT_FIELD,
+        vol.Optional(SERVICE_ATTR_FOLDER, default=DEFAULT_FOLDER): cv.string,
+        vol.Required("uid"): vol.All(cv.string, vol.Match(r"^[0-9]+$")),
+        vol.Optional("body_max_chars", default=DEFAULT_MESSAGE_BODY_CHARS): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=MAX_BODY_CHARS)
+        ),
+    }
+)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register actions independently of config-entry load state."""
+    _register_services(hass)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up Email IMAP from a config entry."""
-    implementation = await async_get_config_entry_implementation(hass, entry)
+    """Set up Email HA from a config entry."""
+    try:
+        implementation = await async_get_config_entry_implementation(hass, entry)
+    except ImplementationUnavailableError as err:
+        raise ConfigEntryNotReady(
+            "OAuth2 implementation temporarily unavailable; will retry"
+        ) from err
     oauth_session = OAuth2Session(hass, entry, implementation)
-
+    settings = {**entry.data, **entry.options}
     coordinator = EmailDataUpdateCoordinator(
         hass=hass,
         oauth_session=oauth_session,
         email_address=entry.data[CONF_EMAIL],
         imap_host=GMAIL_IMAP_HOST,
         imap_port=GMAIL_IMAP_PORT,
-        folder=entry.data.get(CONF_FOLDER, DEFAULT_FOLDER),
-        scan_interval=entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+        folder=settings.get(CONF_FOLDER, DEFAULT_FOLDER),
+        scan_interval=settings.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
     )
-
     try:
         await coordinator.async_config_entry_first_refresh()
     except ConfigEntryAuthFailed:
         raise
     except Exception as err:
-        _LOGGER.warning("Initial email fetch failed: %s: %s", type(err).__name__, err)
-        raise ConfigEntryNotReady(f"Initial email fetch failed: {type(err).__name__}: {err}") from err
+        raise ConfigEntryNotReady("Initial email fetch failed; will retry") from err
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
-
     await hass.config_entries.async_forward_entry_setups(
-        entry, [Platform(p) for p in PLATFORMS]
+        entry, [Platform(platform) for platform in PLATFORMS]
     )
-
-    _register_services(hass)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     coordinator.start_idle()
     entry.async_on_unload(coordinator.stop_idle)
-
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry."""
+    """Unload a config entry while leaving action schemas registered."""
     unloaded = await hass.config_entries.async_unload_platforms(
-        entry, [Platform(p) for p in PLATFORMS]
+        entry, [Platform(platform) for platform in PLATFORMS]
     )
     if unloaded:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
-
-    if not hass.data.get(DOMAIN):
-        hass.services.async_remove(DOMAIN, SERVICE_QUERY_EMAILS)
-
+        hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     return unloaded
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload entry when user-facing config changes (not on token refresh)."""
     coordinator: EmailDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    settings = {**entry.data, **entry.options}
     if (
-        entry.data.get(CONF_FOLDER) != coordinator.folder
-        or entry.data.get(CONF_SCAN_INTERVAL) != coordinator.scan_interval
+        settings.get(CONF_FOLDER, DEFAULT_FOLDER) != coordinator.folder
+        or settings.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        != coordinator.scan_interval
     ):
         await hass.config_entries.async_reload(entry.entry_id)
 
 
+def _coordinator_for_call(
+    hass: HomeAssistant, call: ServiceCall
+) -> EmailDataUpdateCoordinator:
+    configured: dict[str, EmailDataUpdateCoordinator] = hass.data.get(DOMAIN, {})
+    entry_id: str | None = call.data.get("config_entry_id")
+    if entry_id is None:
+        if len(configured) == 1:
+            return next(iter(configured.values()))
+        if not configured:
+            raise ServiceValidationError("No loaded Email HA account is available")
+        raise ServiceValidationError(
+            "Multiple email accounts are configured; select an account"
+        )
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry is None or entry.domain != DOMAIN:
+        raise ServiceValidationError(
+            "The selected config entry is not an Email HA account"
+        )
+    if coordinator := configured.get(entry_id):
+        return coordinator
+    raise ServiceValidationError("The selected Email HA account is not loaded")
+
+
+def _entry_for_coordinator(coordinator: EmailDataUpdateCoordinator) -> ConfigEntry:
+    """Return the coordinator's loaded config entry."""
+    if coordinator.config_entry is None:
+        raise HomeAssistantError("The selected Email HA account is not loaded")
+    return coordinator.config_entry
+
+
+async def _connect_for_call(
+    coordinator: EmailDataUpdateCoordinator,
+) -> ImapClient:
+    try:
+        await coordinator.oauth_session.async_ensure_token_valid()
+        token: dict[str, Any] = coordinator.oauth_session.token
+        access_token = str(token["access_token"])
+        client = ImapClient(GMAIL_IMAP_HOST, GMAIL_IMAP_PORT)
+        await client.connect(
+            _entry_for_coordinator(coordinator).data[CONF_EMAIL], access_token
+        )
+    except ImapAuthError as err:
+        raise HomeAssistantError(
+            "Gmail rejected authentication; reauthenticate the integration"
+        ) from err
+    except ImapClientError as err:
+        raise HomeAssistantError("Unable to connect to Gmail IMAP") from err
+    except Exception as err:
+        raise HomeAssistantError(
+            "OAuth authentication failed; reauthenticate the integration"
+        ) from err
+    return client
+
+
+def _translate_imap_error(err: ImapClientError) -> HomeAssistantError:
+    if isinstance(err, ImapFolderError):
+        return HomeAssistantError("The selected IMAP folder is not accessible")
+    if isinstance(err, ImapSearchError):
+        return HomeAssistantError("The IMAP server rejected the search criteria")
+    if isinstance(err, ImapMessageNotFoundError):
+        return HomeAssistantError(
+            "No message with that UID exists in the selected folder"
+        )
+    return HomeAssistantError("The Gmail IMAP operation failed")
+
+
+async def _search(
+    coordinator: EmailDataUpdateCoordinator,
+    *,
+    folder: str,
+    criteria: str,
+    max_results: int,
+    include_body: bool,
+    body_max_chars: int,
+) -> list[dict[str, Any]]:
+    try:
+        tokenize_search_criteria(criteria)
+    except ValueError as err:
+        raise ServiceValidationError(str(err)) from err
+    client = await _connect_for_call(coordinator)
+    try:
+        async with client:
+            return await client.search_emails(
+                folder,
+                criteria,
+                max_results,
+                include_full_body=include_body,
+                body_max_chars=body_max_chars,
+            )
+    except ImapClientError as err:
+        raise _translate_imap_error(err) from err
+
+
 def _register_services(hass: HomeAssistant) -> None:
-    """Register integration-level services (idempotent)."""
+    """Register the read-only action surface once."""
     if hass.services.has_service(DOMAIN, SERVICE_QUERY_EMAILS):
         return
 
     async def handle_query_emails(call: ServiceCall) -> dict[str, Any]:
-        """Query emails from any configured account."""
-        configured: dict = hass.data.get(DOMAIN, {})
-        entry_id: str | None = call.data.get("config_entry_id")
-        if entry_id is None:
-            if len(configured) == 1:
-                entry_id = next(iter(configured))
-            else:
-                raise ServiceValidationError(
-                    "Multiple email accounts configured — specify an account."
-                )
-        coordinator: EmailDataUpdateCoordinator | None = configured.get(entry_id)
-        if coordinator is None:
-            raise ServiceValidationError(
-                f"No Email IMAP entry with id '{entry_id}'."
-            )
-
-        folder: str = call.data.get(SERVICE_ATTR_FOLDER, DEFAULT_FOLDER)
-        criteria: str = call.data.get(SERVICE_ATTR_SEARCH_CRITERIA, "ALL")
-        max_results: int = call.data.get(SERVICE_ATTR_MAX_RESULTS, 50)
-        include_full_body: bool = call.data.get(SERVICE_ATTR_INCLUDE_FULL_BODY, False)
-        include_attachments: bool = call.data.get(SERVICE_ATTR_INCLUDE_ATTACHMENTS, False)
-
-        try:
-            await coordinator.oauth_session.async_ensure_token_valid()
-        except Exception as err:
-            _LOGGER.warning("Token refresh failed: %s: %s", type(err).__name__, err)
-            raise ServiceValidationError(f"Token refresh failed: {type(err).__name__}: {err}") from err
-
-        token: dict[str, Any] = coordinator.oauth_session.token  # type: ignore[assignment]
-        access_token = str(token["access_token"])
-
-        config_entry = coordinator.config_entry
-        if config_entry is None:
-            raise ServiceValidationError("Config entry not available for this coordinator")
-
-        try:
-            async with ImapClient(GMAIL_IMAP_HOST, GMAIL_IMAP_PORT) as client:
-                await client.connect(config_entry.data[CONF_EMAIL], access_token)
-                emails = await client.search_emails(
-                    folder, criteria, max_results,
-                    include_full_body=include_full_body,
-                    include_attachments=include_attachments,
-                )
-        except ImapAuthError as err:
-            raise ServiceValidationError(f"IMAP authentication error: {err}") from err
-        except Exception as err:
-            _LOGGER.warning("IMAP query failed: %s: %s", type(err).__name__, err)
-            raise ServiceValidationError(f"IMAP query failed: {type(err).__name__}: {err}") from err
-
+        coordinator = _coordinator_for_call(hass, call)
+        emails = await _search(
+            coordinator,
+            folder=call.data[SERVICE_ATTR_FOLDER],
+            criteria=call.data[SERVICE_ATTR_SEARCH_CRITERIA],
+            max_results=call.data[SERVICE_ATTR_MAX_RESULTS],
+            include_body=call.data[SERVICE_ATTR_INCLUDE_FULL_BODY],
+            body_max_chars=DEFAULT_MESSAGE_BODY_CHARS,
+        )
         return {"emails": emails}
+
+    async def handle_search_emails(call: ServiceCall) -> dict[str, Any]:
+        coordinator = _coordinator_for_call(hass, call)
+        folder = call.data[SERVICE_ATTR_FOLDER]
+        criteria = call.data[SERVICE_ATTR_SEARCH_CRITERIA]
+        emails = await _search(
+            coordinator,
+            folder=folder,
+            criteria=criteria,
+            max_results=call.data[SERVICE_ATTR_MAX_RESULTS],
+            include_body=call.data["include_body"],
+            body_max_chars=call.data["body_max_chars"],
+        )
+        return {
+            "account": _entry_for_coordinator(coordinator).data[CONF_EMAIL],
+            "folder": folder,
+            "search_criteria": criteria,
+            "count": len(emails),
+            "emails": emails,
+            "truncated": len(emails) == call.data[SERVICE_ATTR_MAX_RESULTS],
+        }
+
+    async def handle_get_message(call: ServiceCall) -> dict[str, Any]:
+        coordinator = _coordinator_for_call(hass, call)
+        folder = call.data[SERVICE_ATTR_FOLDER]
+        client = await _connect_for_call(coordinator)
+        try:
+            async with client:
+                message = await client.get_message(
+                    folder,
+                    call.data["uid"],
+                    body_max_chars=call.data["body_max_chars"],
+                )
+        except ImapClientError as err:
+            raise _translate_imap_error(err) from err
+        return {
+            "account": _entry_for_coordinator(coordinator).data[CONF_EMAIL],
+            "folder": folder,
+            "message": message,
+        }
 
     hass.services.async_register(
         DOMAIN,
         SERVICE_QUERY_EMAILS,
         handle_query_emails,
         schema=QUERY_EMAILS_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SEARCH_EMAILS,
+        handle_search_emails,
+        schema=SEARCH_EMAILS_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_GET_MESSAGE,
+        handle_get_message,
+        schema=GET_MESSAGE_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )
