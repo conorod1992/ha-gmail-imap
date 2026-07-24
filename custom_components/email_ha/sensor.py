@@ -1,4 +1,5 @@
 """Sensor platform for Email IMAP."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -53,6 +54,11 @@ def _device_info(entry: ConfigEntry) -> DeviceInfo:
         model="Gmail IMAP (OAuth2)",
         entry_type=DeviceEntryType.SERVICE,
     )
+
+
+def _entry_folder(entry: ConfigEntry) -> str:
+    """Return the effective configured folder, including options."""
+    return entry.options.get(CONF_FOLDER, entry.data.get(CONF_FOLDER, "INBOX"))
 
 
 class _BaseEmailSensor(CoordinatorEntity[EmailDataUpdateCoordinator], SensorEntity):
@@ -119,7 +125,7 @@ class UnreadCountSensor(_BaseEmailSensor):
 
     @property
     def extra_state_attributes(self) -> dict:
-        return {ATTR_FOLDER: self._entry.data.get(CONF_FOLDER, "INBOX")}
+        return {ATTR_FOLDER: _entry_folder(self._entry)}
 
 
 class TotalCountSensor(_BaseEmailSensor):
@@ -143,7 +149,7 @@ class TotalCountSensor(_BaseEmailSensor):
 
     @property
     def extra_state_attributes(self) -> dict:
-        return {ATTR_FOLDER: self._entry.data.get(CONF_FOLDER, "INBOX")}
+        return {ATTR_FOLDER: _entry_folder(self._entry)}
 
 
 class FoldersSensor(_BaseEmailSensor):
@@ -208,6 +214,6 @@ class LastEmailSensor(_BaseEmailSensor):
             ATTR_SENDER_EMAIL: email.get(ATTR_SENDER_EMAIL),
             ATTR_DATE: email.get(ATTR_DATE),
             ATTR_UID: email.get(ATTR_UID),
-            ATTR_FOLDER: self._entry.data.get(CONF_FOLDER, "INBOX"),
+            ATTR_FOLDER: _entry_folder(self._entry),
             "recent_emails": recent,
         }

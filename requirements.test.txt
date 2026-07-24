@@ -1,4 +1,4 @@
 pytest
 pytest-asyncio
 pytest-homeassistant-custom-component
-aioimaplib>=1.0.1
+aioimaplib==2.0.1

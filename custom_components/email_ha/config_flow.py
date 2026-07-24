@@ -1,4 +1,5 @@
 """Config flow for Email IMAP (Gmail via OAuth2)."""
+
 from __future__ import annotations
 
 import logging
@@ -6,7 +7,12 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntry, ConfigFlowResult, OptionsFlow
+from homeassistant.config_entries import (
+    SOURCE_REAUTH,
+    ConfigEntry,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.helpers import config_entry_oauth2_flow, selector
 
 from .const import (
@@ -24,8 +30,12 @@ _LOGGER = logging.getLogger(__name__)
 STEP_SETTINGS_SCHEMA = vol.Schema(
     {
         vol.Optional(CONF_FOLDER, default=DEFAULT_FOLDER): str,
-        vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): selector.NumberSelector(
-            selector.NumberSelectorConfig(min=30, max=3600, mode=selector.NumberSelectorMode.BOX)
+        vol.Optional(
+            CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=30, max=3600, mode=selector.NumberSelectorMode.BOX
+            )
         ),
     }
 )
@@ -81,9 +91,7 @@ class OAuth2FlowHandler(
 
         return await self.async_step_pick_implementation()
 
-    async def async_step_reauth(
-        self, entry_data: dict[str, Any]
-    ) -> ConfigFlowResult:
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
         """Handle re-authentication."""
         self._email = entry_data.get(CONF_EMAIL, "")
         return await self.async_step_reauth_confirm()
@@ -142,7 +150,7 @@ class EmailIMAPOptionsFlow(OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current = self.config_entry.data
+        current = {**self.config_entry.data, **self.config_entry.options}
         schema = vol.Schema(
             {
                 vol.Optional(
@@ -152,7 +160,9 @@ class EmailIMAPOptionsFlow(OptionsFlow):
                     CONF_SCAN_INTERVAL,
                     default=current.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
                 ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=30, max=3600, mode=selector.NumberSelectorMode.BOX)
+                    selector.NumberSelectorConfig(
+                        min=30, max=3600, mode=selector.NumberSelectorMode.BOX
+                    )
                 ),
             }
         )
