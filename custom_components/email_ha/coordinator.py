@@ -26,10 +26,19 @@ from .const import (
     POLL_FETCH_COUNT,
 )
 from .imap_client import ImapAuthError, ImapClient, ImapClientError
+from .search import build_structured_search_tokens
 
 _LOGGER = logging.getLogger(__name__)
 
 _FOLDER_REFRESH_INTERVAL = 86400
+
+
+@dataclass
+class SearchCountData:
+    """Bounded state for one user-defined search sensor."""
+
+    count: int | None = None
+    newest_uid: str | None = None
 
 
 @dataclass
@@ -40,6 +49,7 @@ class EmailData:
     unread_count: int = 0
     total_count: int = 0
     folders: list[str] = field(default_factory=list)
+    search_counts: dict[str, SearchCountData] = field(default_factory=dict)
 
     @property
     def latest_email(self) -> dict[str, Any] | None:
@@ -66,6 +76,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         imap_port: int,
         folder: str,
         scan_interval: int,
+        search_sensors: list[dict[str, Any]] | None = None,
     ) -> None:
         self.oauth_session = oauth_session
         self._email = email_address
@@ -73,6 +84,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         self._imap_port = imap_port
         self._folder = folder
         self._scan_interval = scan_interval
+        self.search_sensors = search_sensors or []
         self._last_uid: str | None = None
         self.last_success_time: datetime | None = None
         self._idle_task: asyncio.Task | None = None
@@ -136,6 +148,26 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             self._cached_folders = await client.list_folders()
             self._folders_fetched_at = time.monotonic()
         emails = await client.search_emails(self._folder, "ALL", POLL_FETCH_COUNT)
+        search_counts: dict[str, SearchCountData] = {}
+        for monitor in self.search_sensors:
+            monitor_id = str(monitor.get("id", ""))
+            if not monitor_id:
+                continue
+            try:
+                tokens = build_structured_search_tokens(monitor.get("filters", {}))
+                count, newest_uid = await client.count_emails(
+                    str(monitor.get("folder", self._folder)), tokens
+                )
+            except (ImapClientError, ValueError) as err:
+                _LOGGER.warning(
+                    "Unable to update search sensor %s for %s: %s",
+                    monitor_id,
+                    self._email,
+                    type(err).__name__,
+                )
+                search_counts[monitor_id] = SearchCountData()
+            else:
+                search_counts[monitor_id] = SearchCountData(count, newest_uid)
         self.last_success_time = datetime.now(timezone.utc)
         _LOGGER.debug(
             "Fetched %d emails for %s (%d unread)",
@@ -148,6 +180,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             unread_count=status.get("unseen", 0),
             total_count=status.get("messages", 0),
             folders=self._cached_folders,
+            search_counts=search_counts,
         )
 
     async def _async_update_data(self) -> EmailData:

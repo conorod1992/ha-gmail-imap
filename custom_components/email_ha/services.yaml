@@ -2,7 +2,7 @@ query_emails:
   name: Query emails (legacy)
   description: >
     Backwards-compatible IMAP search action. New automations should use
-    search_emails. Attachment content is never returned.
+    find_emails. Attachment content is never returned.
   fields:
     config_entry_id:
       name: Account
@@ -50,10 +50,10 @@ query_emails:
         boolean: {}
 
 search_emails:
-  name: Search emails
+  name: Search emails (advanced IMAP)
   description: >
-    Search a selected Gmail account with standard IMAP criteria and return
-    structured message metadata. Request bodies only when necessary.
+    Search using raw standard IMAP SEARCH criteria. Intended for advanced
+    queries; for normal automations use Find emails.
   fields:
     config_entry_id:
       name: Account
@@ -95,6 +95,145 @@ search_emails:
     body_max_chars:
       name: Body character limit
       description: Maximum plain-text body characters per message (1-20000).
+      default: 4000
+      selector:
+        number:
+          min: 1
+          max: 20000
+          mode: box
+
+find_emails:
+  name: Find emails
+  description: >
+    Find messages with UI-friendly filters. Populated filters combine with AND;
+    Gmail category and importance use Gmail's documented IMAP extension.
+  fields:
+    config_entry_id:
+      name: Account
+      description: Required when more than one Gmail account is configured.
+      required: false
+      selector:
+        config_entry:
+          integration: email_ha
+    folder:
+      name: Folder
+      description: IMAP folder to search. Message UIDs are folder-specific.
+      default: INBOX
+      selector:
+        text: {}
+    from:
+      name: From contains
+      selector:
+        text: {}
+    to:
+      name: To contains
+      selector:
+        text: {}
+    cc:
+      name: CC contains
+      selector:
+        text: {}
+    subject:
+      name: Subject contains
+      selector:
+        text: {}
+    body:
+      name: Body contains
+      description: Uses server-side IMAP BODY search; messages are not downloaded to filter.
+      selector:
+        text: {}
+    text:
+      name: Any text contains
+      description: Standard IMAP TEXT search across headers and body on the server.
+      selector:
+        text: {}
+    read_state:
+      name: Read state
+      default: any
+      selector:
+        select:
+          options:
+            - label: Any
+              value: any
+            - label: Unread
+              value: unread
+            - label: Read
+              value: read
+    starred_state:
+      name: Starred state
+      default: any
+      selector:
+        select:
+          options:
+            - label: Any
+              value: any
+            - label: Starred
+              value: starred
+            - label: Not starred
+              value: not_starred
+    important_state:
+      name: Gmail importance
+      default: any
+      selector:
+        select:
+          options:
+            - label: Any
+              value: any
+            - label: Important
+              value: important
+            - label: Not important
+              value: not_important
+    gmail_category:
+      name: Gmail category
+      description: Gmail classification queried through IMAP X-GM-RAW.
+      default: any
+      selector:
+        select:
+          options:
+            - label: Any
+              value: any
+            - label: Primary
+              value: primary
+            - label: Promotions
+              value: promotions
+            - label: Social
+              value: social
+            - label: Updates
+              value: updates
+            - label: Forums
+              value: forums
+    since:
+      name: Since date
+      description: Inclusive, date-based IMAP SINCE filter.
+      selector:
+        date: {}
+    before:
+      name: Before date
+      description: Exclusive, date-based IMAP BEFORE filter.
+      selector:
+        date: {}
+    on:
+      name: On date
+      description: Date-based IMAP ON filter.
+      selector:
+        date: {}
+    max_results:
+      name: Maximum results
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 25
+          mode: box
+    include_body:
+      name: Include body
+      description: Include bounded readable plain text. Off by default for privacy.
+      default: false
+      selector:
+        boolean: {}
+    body_max_chars:
+      name: Body character limit
+      description: Ignored unless Include body is enabled.
       default: 4000
       selector:
         number:

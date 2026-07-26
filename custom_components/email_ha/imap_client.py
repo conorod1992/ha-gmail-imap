@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 import contextlib
 import re
 import shlex
@@ -21,6 +22,7 @@ from .const import (
     MAX_SEARCH_TOKENS,
 )
 from .mime_parser import parse_email_bytes
+from .search import validate_imap_folder, validate_search_tokens
 
 _FLAGS_RE = re.compile(r"FLAGS \(([^)]*)\)", re.IGNORECASE)
 _INTERNAL_DATE_RE = re.compile(r'INTERNALDATE "([^"]+)"', re.IGNORECASE)
@@ -153,6 +155,7 @@ class ImapClient:
 
     async def get_folder_status(self, folder: str) -> dict[str, int]:
         """Return message and unseen counts for a folder."""
+        folder = validate_imap_folder(folder)
         response = await self._require_client().status(folder, "(MESSAGES UNSEEN)")
         if response.result != "OK":
             raise ImapFolderError("The selected folder is not accessible")
@@ -187,6 +190,52 @@ class ImapClient:
         if not 1 <= body_max_chars <= MAX_BODY_CHARS:
             raise ValueError(f"body_max_chars must be between 1 and {MAX_BODY_CHARS}")
         tokens = tokenize_search_criteria(criteria)
+        return await self.search_emails_tokens(
+            folder,
+            tokens,
+            max_results,
+            include_body=include_full_body,
+            body_max_chars=body_max_chars,
+        )
+
+    async def search_emails_tokens(
+        self,
+        folder: str,
+        tokens: Sequence[str],
+        max_results: int = 10,
+        *,
+        include_body: bool = False,
+        body_max_chars: int = 4000,
+    ) -> list[dict[str, Any]]:
+        """Search with pre-tokenized criteria and return newest matches first."""
+        if not 1 <= max_results <= MAX_SEARCH_RESULTS:
+            raise ValueError(f"max_results must be between 1 and {MAX_SEARCH_RESULTS}")
+        if not 1 <= body_max_chars <= MAX_BODY_CHARS:
+            raise ValueError(f"body_max_chars must be between 1 and {MAX_BODY_CHARS}")
+        uids = await self._search_uids(folder, validate_search_tokens(tokens))
+        return [
+            message
+            for uid in reversed(uids[-max_results:])
+            if (
+                message := await self._fetch_email(
+                    uid,
+                    folder,
+                    include_body=include_body,
+                    body_max_chars=body_max_chars,
+                )
+            )
+            is not None
+        ]
+
+    async def count_emails(
+        self, folder: str, tokens: Sequence[str]
+    ) -> tuple[int, str | None]:
+        """Return the matching UID count and newest UID without fetching messages."""
+        uids = await self._search_uids(folder, validate_search_tokens(tokens))
+        return len(uids), uids[-1] if uids else None
+
+    async def _search_uids(self, folder: str, tokens: Sequence[str]) -> list[str]:
+        """Run a read-only UID SEARCH and return matching UIDs."""
         client = self._require_client()
         await self._select_read_only(folder)
         response = await client.uid_search(*tokens, charset=None)
@@ -200,20 +249,7 @@ class ImapClient:
             if isinstance(uid_line, bytes)
             else str(uid_line)
         )
-        uids = uid_text.strip().split()
-        return [
-            message
-            for uid in reversed(uids[-max_results:])
-            if (
-                message := await self._fetch_email(
-                    uid,
-                    folder,
-                    include_body=include_full_body,
-                    body_max_chars=body_max_chars,
-                )
-            )
-            is not None
-        ]
+        return uid_text.strip().split()
 
     async def get_message(
         self, folder: str, uid: str, *, body_max_chars: int
@@ -234,6 +270,7 @@ class ImapClient:
         return message
 
     async def _select_read_only(self, folder: str) -> None:
+        folder = validate_imap_folder(folder)
         client = self._require_client()
         response = await client.examine(folder)
         if response.result != "OK":

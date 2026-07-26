@@ -38,11 +38,52 @@
     "step": {
       "init": {
         "title": "Gmail IMAP options",
+        "menu_options": {
+          "mailbox": "Mailbox settings",
+          "add_search_sensor": "Add email search sensor",
+          "remove_search_sensor": "Remove email search sensor"
+        }
+      },
+      "mailbox": {
+        "title": "Mailbox settings",
         "data": {
           "folder": "IMAP folder",
           "scan_interval": "Poll interval (seconds)"
         }
+      },
+      "add_search_sensor": {
+        "title": "Add email search sensor",
+        "description": "The sensor counts matching UIDs on the server without fetching message bodies. Populated filters combine with AND.",
+        "data": {
+          "name": "Name",
+          "folder": "IMAP folder",
+          "from": "From contains",
+          "to": "To contains",
+          "cc": "CC contains",
+          "subject": "Subject contains",
+          "body": "Body contains",
+          "text": "Any text contains",
+          "read_state": "Read state",
+          "starred_state": "Starred state",
+          "important_state": "Gmail importance",
+          "gmail_category": "Gmail category",
+          "since": "Since date",
+          "before": "Before date",
+          "on": "On date"
+        }
+      },
+      "remove_search_sensor": {
+        "title": "Remove email search sensor",
+        "data": {
+          "sensor_id": "Search sensor"
+        }
       }
+    },
+    "error": {
+      "invalid_search_filters": "One or more search filters are invalid. Remove control characters and use valid dates."
+    },
+    "abort": {
+      "too_many_search_sensors": "The maximum of 20 email search sensors has been reached."
     }
   },
   "entity": {
@@ -58,11 +99,15 @@
   "services": {
     "query_emails": {
       "name": "Query emails (legacy)",
-      "description": "Backwards-compatible IMAP search action. New automations should use search emails."
+      "description": "Backwards-compatible IMAP search action. New automations should use Find emails."
     },
     "search_emails": {
-      "name": "Search emails",
-      "description": "Search a selected Gmail account with standard IMAP criteria and return structured message metadata."
+      "name": "Search emails (advanced IMAP)",
+      "description": "Search using raw standard IMAP SEARCH criteria. For ordinary automations, use Find emails."
+    },
+    "find_emails": {
+      "name": "Find emails",
+      "description": "Find messages with UI-friendly filters that combine using AND."
     },
     "get_message": {
       "name": "Get message",
