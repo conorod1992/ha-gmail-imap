@@ -21,6 +21,7 @@ from .const import (
     ATTR_UID,
     CONF_EMAIL,
     CONF_FOLDER,
+    CONF_SEARCH_SENSORS,
     DOMAIN,
     UNAVAILABLE_AFTER_SECONDS,
 )
@@ -36,14 +37,17 @@ async def async_setup_entry(
 ) -> None:
     """Set up Email IMAP sensors for a config entry."""
     coordinator: EmailDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        [
-            UnreadCountSensor(coordinator, entry),
-            TotalCountSensor(coordinator, entry),
-            FoldersSensor(coordinator, entry),
-            LastEmailSensor(coordinator, entry),
-        ]
+    entities: list[SensorEntity] = [
+        UnreadCountSensor(coordinator, entry),
+        TotalCountSensor(coordinator, entry),
+        FoldersSensor(coordinator, entry),
+        LastEmailSensor(coordinator, entry),
+    ]
+    entities.extend(
+        SearchCountSensor(coordinator, entry, monitor)
+        for monitor in entry.options.get(CONF_SEARCH_SENSORS, [])
     )
+    async_add_entities(entities)
 
 
 def _device_info(entry: ConfigEntry) -> DeviceInfo:
@@ -216,4 +220,42 @@ class LastEmailSensor(_BaseEmailSensor):
             ATTR_UID: email.get(ATTR_UID),
             ATTR_FOLDER: _entry_folder(self._entry),
             "recent_emails": recent,
+        }
+
+
+class SearchCountSensor(_BaseEmailSensor):
+    """Count of messages matching one optional structured search."""
+
+    _attr_icon = "mdi:email-search-outline"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "messages"
+    _attr_suggested_display_precision = 0
+
+    def __init__(
+        self,
+        coordinator: EmailDataUpdateCoordinator,
+        entry: ConfigEntry,
+        monitor: dict,
+    ) -> None:
+        self._monitor = monitor
+        self._monitor_id = str(monitor["id"])
+        self._attr_name = str(monitor["name"])
+        super().__init__(coordinator, entry, f"search_{self._monitor_id}")
+
+    @property
+    def native_value(self) -> int | None:
+        data = self._email_data
+        if not data or not (result := data.search_counts.get(self._monitor_id)):
+            return None
+        return result.count
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        data = self._email_data
+        result = data.search_counts.get(self._monitor_id) if data else None
+        filters = self._monitor.get("filters", {})
+        return {
+            ATTR_FOLDER: self._monitor.get(CONF_FOLDER, "INBOX"),
+            "filter_types": sorted(filters),
+            "newest_matching_uid": result.newest_uid if result else None,
         }

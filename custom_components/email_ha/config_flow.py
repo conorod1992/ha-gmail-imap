@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from uuid import uuid4
 
 import voluptuous as vol
 
@@ -19,10 +20,20 @@ from .const import (
     CONF_EMAIL,
     CONF_FOLDER,
     CONF_SCAN_INTERVAL,
+    CONF_SEARCH_SENSORS,
     DEFAULT_FOLDER,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     GMAIL_SCOPES,
+    MAX_SEARCH_SENSORS,
+)
+from .search import (
+    GMAIL_CATEGORIES,
+    IMPORTANT_STATES,
+    READ_STATES,
+    STARRED_STATES,
+    build_structured_search_tokens,
+    normalize_structured_filters,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,6 +50,40 @@ STEP_SETTINGS_SCHEMA = vol.Schema(
         ),
     }
 )
+
+
+def _select(values: tuple[str, ...]) -> selector.SelectSelector:
+    """Return a dropdown selector for fixed search choices."""
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=list(values), mode=selector.SelectSelectorMode.DROPDOWN
+        )
+    )
+
+
+def _search_sensor_schema() -> vol.Schema:
+    """Return the UI schema for one structured count sensor."""
+    return vol.Schema(
+        {
+            vol.Required("name"): selector.TextSelector(),
+            vol.Optional(CONF_FOLDER, default=DEFAULT_FOLDER): selector.TextSelector(),
+            vol.Optional("from"): selector.TextSelector(),
+            vol.Optional("to"): selector.TextSelector(),
+            vol.Optional("cc"): selector.TextSelector(),
+            vol.Optional("subject"): selector.TextSelector(),
+            vol.Optional("body"): selector.TextSelector(),
+            vol.Optional("text"): selector.TextSelector(),
+            vol.Optional("read_state", default="any"): _select(READ_STATES),
+            vol.Optional("starred_state", default="any"): _select(STARRED_STATES),
+            vol.Optional("important_state", default="any"): _select(IMPORTANT_STATES),
+            vol.Optional("gmail_category", default="any"): _select(
+                ("any", *GMAIL_CATEGORIES)
+            ),
+            vol.Optional("since"): selector.DateSelector(),
+            vol.Optional("before"): selector.DateSelector(),
+            vol.Optional("on"): selector.DateSelector(),
+        }
+    )
 
 
 class OAuth2FlowHandler(
@@ -142,14 +187,24 @@ class OAuth2FlowHandler(
 
 
 class EmailIMAPOptionsFlow(OptionsFlow):
-    """Options flow to update folder and polling settings."""
+    """Options flow for mailbox settings and optional count sensors."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+        """Show the options menu."""
+        del user_input
+        menu_options = ["mailbox", "add_search_sensor"]
+        if self.config_entry.options.get(CONF_SEARCH_SENSORS):
+            menu_options.append("remove_search_sensor")
+        return self.async_show_menu(step_id="init", menu_options=menu_options)
 
+    async def async_step_mailbox(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Update the monitored folder and polling settings."""
+        if user_input is not None:
+            return self._save_options(user_input)
         current = {**self.config_entry.data, **self.config_entry.options}
         schema = vol.Schema(
             {
@@ -166,4 +221,74 @@ class EmailIMAPOptionsFlow(OptionsFlow):
                 ),
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(step_id="mailbox", data_schema=schema)
+
+    async def async_step_add_search_sensor(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Add one optional structured search/count sensor."""
+        sensors = list(self.config_entry.options.get(CONF_SEARCH_SENSORS, []))
+        if len(sensors) >= MAX_SEARCH_SENSORS:
+            return self.async_abort(reason="too_many_search_sensors")
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            name = str(user_input["name"]).strip()
+            folder = str(user_input[CONF_FOLDER]).strip()
+            if not name or not folder:
+                errors["base"] = "invalid_search_filters"
+            else:
+                try:
+                    filters = normalize_structured_filters(user_input)
+                    build_structured_search_tokens(filters)
+                except ValueError:
+                    errors["base"] = "invalid_search_filters"
+                else:
+                    sensors.append(
+                        {
+                            "id": uuid4().hex,
+                            "name": name,
+                            CONF_FOLDER: folder,
+                            "filters": filters,
+                        }
+                    )
+                    return self._save_options({CONF_SEARCH_SENSORS: sensors})
+        return self.async_show_form(
+            step_id="add_search_sensor",
+            data_schema=_search_sensor_schema(),
+            errors=errors,
+        )
+
+    async def async_step_remove_search_sensor(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Remove one configured search/count sensor."""
+        sensors = list(self.config_entry.options.get(CONF_SEARCH_SENSORS, []))
+        if user_input is not None:
+            selected = user_input["sensor_id"]
+            return self._save_options(
+                {
+                    CONF_SEARCH_SENSORS: [
+                        sensor for sensor in sensors if sensor.get("id") != selected
+                    ]
+                }
+            )
+        choices = [
+            selector.SelectOptionDict(value=sensor["id"], label=sensor["name"])
+            for sensor in sensors
+        ]
+        return self.async_show_form(
+            step_id="remove_search_sensor",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("sensor_id"): selector.SelectSelector(
+                        selector.SelectSelectorConfig(options=choices)
+                    )
+                }
+            ),
+        )
+
+    def _save_options(self, changes: dict[str, Any]) -> ConfigFlowResult:
+        """Save changed options without discarding unrelated options."""
+        return self.async_create_entry(
+            title="", data={**self.config_entry.options, **changes}
+        )

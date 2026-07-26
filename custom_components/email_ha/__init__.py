@@ -28,6 +28,7 @@ from .const import (
     CONF_EMAIL,
     CONF_FOLDER,
     CONF_SCAN_INTERVAL,
+    CONF_SEARCH_SENSORS,
     DEFAULT_FOLDER,
     DEFAULT_MESSAGE_BODY_CHARS,
     DEFAULT_SCAN_INTERVAL,
@@ -44,6 +45,7 @@ from .const import (
     SERVICE_ATTR_INCLUDE_FULL_BODY,
     SERVICE_ATTR_MAX_RESULTS,
     SERVICE_ATTR_SEARCH_CRITERIA,
+    SERVICE_FIND_EMAILS,
     SERVICE_GET_MESSAGE,
     SERVICE_QUERY_EMAILS,
     SERVICE_SEARCH_EMAILS,
@@ -57,6 +59,14 @@ from .imap_client import (
     ImapMessageNotFoundError,
     ImapSearchError,
     tokenize_search_criteria,
+)
+from .search import (
+    GMAIL_CATEGORIES,
+    IMPORTANT_STATES,
+    READ_STATES,
+    STARRED_STATES,
+    build_structured_search_tokens,
+    normalize_structured_filters,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -79,6 +89,34 @@ SEARCH_EMAILS_SCHEMA = vol.Schema(
         **_ACCOUNT_FIELD,
         vol.Optional(SERVICE_ATTR_FOLDER, default=DEFAULT_FOLDER): cv.string,
         vol.Optional(SERVICE_ATTR_SEARCH_CRITERIA, default="ALL"): cv.string,
+        vol.Optional(SERVICE_ATTR_MAX_RESULTS, default=DEFAULT_SEARCH_RESULTS): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=MAX_SEARCH_RESULTS)
+        ),
+        vol.Optional("include_body", default=False): cv.boolean,
+        vol.Optional("body_max_chars", default=DEFAULT_SEARCH_BODY_CHARS): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=MAX_BODY_CHARS)
+        ),
+    }
+)
+FIND_EMAILS_SCHEMA = vol.Schema(
+    {
+        **_ACCOUNT_FIELD,
+        vol.Optional(SERVICE_ATTR_FOLDER, default=DEFAULT_FOLDER): cv.string,
+        vol.Optional("from"): cv.string,
+        vol.Optional("to"): cv.string,
+        vol.Optional("cc"): cv.string,
+        vol.Optional("subject"): cv.string,
+        vol.Optional("body"): cv.string,
+        vol.Optional("text"): cv.string,
+        vol.Optional("read_state", default="any"): vol.In(READ_STATES),
+        vol.Optional("starred_state", default="any"): vol.In(STARRED_STATES),
+        vol.Optional("important_state", default="any"): vol.In(IMPORTANT_STATES),
+        vol.Optional("gmail_category", default="any"): vol.In(
+            ("any", *GMAIL_CATEGORIES)
+        ),
+        vol.Optional("since"): cv.string,
+        vol.Optional("before"): cv.string,
+        vol.Optional("on"): cv.string,
         vol.Optional(SERVICE_ATTR_MAX_RESULTS, default=DEFAULT_SEARCH_RESULTS): vol.All(
             vol.Coerce(int), vol.Range(min=1, max=MAX_SEARCH_RESULTS)
         ),
@@ -124,6 +162,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         imap_port=GMAIL_IMAP_PORT,
         folder=settings.get(CONF_FOLDER, DEFAULT_FOLDER),
         scan_interval=settings.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+        search_sensors=settings.get(CONF_SEARCH_SENSORS, []),
     )
     try:
         await coordinator.async_config_entry_first_refresh()
@@ -153,14 +192,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    coordinator: EmailDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
-    settings = {**entry.data, **entry.options}
-    if (
-        settings.get(CONF_FOLDER, DEFAULT_FOLDER) != coordinator.folder
-        or settings.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
-        != coordinator.scan_interval
-    ):
-        await hass.config_entries.async_reload(entry.entry_id)
+    """Reload so mailbox and dynamically configured entities stay in sync."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 def _coordinator_for_call(
@@ -256,6 +289,30 @@ async def _search(
         raise _translate_imap_error(err) from err
 
 
+async def _search_tokens(
+    coordinator: EmailDataUpdateCoordinator,
+    *,
+    folder: str,
+    tokens: list[str],
+    max_results: int,
+    include_body: bool,
+    body_max_chars: int,
+) -> list[dict[str, Any]]:
+    """Run one validated structured search without string round-tripping."""
+    client = await _connect_for_call(coordinator)
+    try:
+        async with client:
+            return await client.search_emails_tokens(
+                folder,
+                tokens,
+                max_results,
+                include_body=include_body,
+                body_max_chars=body_max_chars,
+            )
+    except ImapClientError as err:
+        raise _translate_imap_error(err) from err
+
+
 def _register_services(hass: HomeAssistant) -> None:
     """Register the read-only action surface once."""
     if hass.services.has_service(DOMAIN, SERVICE_QUERY_EMAILS):
@@ -294,6 +351,31 @@ def _register_services(hass: HomeAssistant) -> None:
             "truncated": len(emails) == call.data[SERVICE_ATTR_MAX_RESULTS],
         }
 
+    async def handle_find_emails(call: ServiceCall) -> dict[str, Any]:
+        coordinator = _coordinator_for_call(hass, call)
+        folder = call.data[SERVICE_ATTR_FOLDER]
+        try:
+            filters = normalize_structured_filters(call.data)
+            tokens = build_structured_search_tokens(filters)
+        except ValueError as err:
+            raise ServiceValidationError(str(err)) from err
+        emails = await _search_tokens(
+            coordinator,
+            folder=folder,
+            tokens=tokens,
+            max_results=call.data[SERVICE_ATTR_MAX_RESULTS],
+            include_body=call.data["include_body"],
+            body_max_chars=call.data["body_max_chars"],
+        )
+        return {
+            "account": _entry_for_coordinator(coordinator).data[CONF_EMAIL],
+            "folder": folder,
+            "filters": filters,
+            "count": len(emails),
+            "emails": emails,
+            "truncated": len(emails) == call.data[SERVICE_ATTR_MAX_RESULTS],
+        }
+
     async def handle_get_message(call: ServiceCall) -> dict[str, Any]:
         coordinator = _coordinator_for_call(hass, call)
         folder = call.data[SERVICE_ATTR_FOLDER]
@@ -325,6 +407,13 @@ def _register_services(hass: HomeAssistant) -> None:
         SERVICE_SEARCH_EMAILS,
         handle_search_emails,
         schema=SEARCH_EMAILS_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_FIND_EMAILS,
+        handle_find_emails,
+        schema=FIND_EMAILS_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )
     hass.services.async_register(

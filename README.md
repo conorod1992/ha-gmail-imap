@@ -34,7 +34,8 @@ authenticate a normal IMAP session. See Google's
 
 - unread, total, folder-count, and latest-email sensors;
 - `email_ha_new_email` event without complete message bodies;
-- `email_ha.search_emails` for bounded standard IMAP searches;
+- `email_ha.find_emails` for UI-friendly structured searches;
+- `email_ha.search_emails` for advanced raw IMAP searches;
 - `email_ha.get_message` for explicit folder-specific retrieval;
 - backwards-compatible `email_ha.query_emails` action;
 - multiple Gmail accounts with explicit account selection when ambiguous.
@@ -99,6 +100,43 @@ Existing config entries and entity unique IDs are preserved. Sensors include:
 - selectable folder count and names;
 - latest email subject and bounded metadata.
 
+The existing unread sensor still means IMAP `UNSEEN` in the configured folder
+(normally `INBOX`). Its unique ID remains `<config-entry-id>_unread_count`, so
+existing automations and entity customisations are not silently redefined.
+
+### Gmail Inbox versus Primary
+
+Gmail's IMAP `INBOX` represents every message carrying the Inbox label. It can
+therefore include messages Gmail's web interface classifies as Primary,
+Promotions, Social, Updates, or Forums. An IMAP unread count of 340 can
+legitimately coexist with 0 unread in the web UI's Primary tab.
+
+Gmail does not expose category tabs as ordinary IMAP folders. It does,
+however, officially extend IMAP `SEARCH` with `X-GM-RAW`, whose single argument
+uses Gmail search syntax. Email HA uses that documented extension only when a
+configured structured search selects a Gmail category or importance state. For
+example, Primary + Unread becomes the AND-combined IMAP search tokens
+`UNSEEN X-GM-RAW "category:primary"`. This reflects Gmail's category
+classification; a web UI setting such as **Include starred in Primary** can
+make the visible tab differ from a pure `category:primary` count.
+
+See Google's [IMAP extension documentation](https://developers.google.com/workspace/gmail/imap/imap-extensions)
+and [category behavior](https://support.google.com/mail/answer/3094499).
+
+### Optional email search sensors
+
+After connecting an account, open its **Configure** dialog and choose **Add
+email search sensor**. Each sensor has a user-facing name, folder, and the same
+structured filters as `find_emails`. For example, configure `RSA unread` with
+folder `INBOX`, From contains `rsa.ie`, and Read state `unread`; its state is
+the number of matching messages.
+
+All optional sensors run through the account's existing coordinator and IMAP
+session. They use server-side `UID SEARCH`, count returned UIDs, and do not
+fetch headers or message bodies. Their attributes contain only the folder,
+filter field names, and newest matching UID—not filter values or email bodies.
+Up to 20 may be configured per account to keep refresh work bounded.
+
 `email_ha_new_email` fires when a newer folder UID is observed after the initial
 refresh. Its payload includes account/folder and the same bounded metadata used
 by polling, never a complete body.
@@ -107,10 +145,39 @@ by polling, never a complete body.
 
 All actions return dictionaries and arrays suitable for `response_variable`.
 
-### `email_ha.search_emails`
+### `email_ha.find_emails`
 
-Use this first to identify likely messages. Search criteria are standard IMAP
-criteria, not Gmail web/API search syntax.
+Use this action for normal automations. Populated fields combine with logical
+AND and are converted to validated IMAP tokens without constructing and
+reparsing a raw command string.
+
+```yaml
+action: email_ha.find_emails
+data:
+  from: notifications@example.com
+  subject: booking
+  read_state: unread
+  since: "2026-07-01"
+  max_results: 10
+response_variable: email_results
+```
+
+Supported filters include From, To, CC, Subject, server-side Body, server-side
+Text, read state, starred state, Gmail category/importance, and date-based
+Since, Before, or On. IMAP date searches have day resolution. `include_body`
+defaults to false, and `body_max_chars` is ignored unless body inclusion is
+enabled.
+
+The response includes `account`, `folder`, the populated `filters`, `count`,
+`emails`, and `truncated`. Message dictionaries use the shape documented below.
+
+### `email_ha.search_emails` (advanced IMAP)
+
+This existing action remains backwards compatible and accepts raw standard
+IMAP criteria for advanced searches. Gmail web syntax such as
+`from:person@example.com is:unread category:primary` is not standard IMAP
+SEARCH syntax. Gmail-specific raw searches must explicitly use the documented
+`X-GM-RAW` extension.
 
 | Field | Default | Limits |
 |---|---:|---:|
@@ -173,6 +240,12 @@ Useful IMAP criteria:
 | Subject | `SUBJECT "renewal"` |
 | Since an IMAP date | `SINCE 01-Jul-2026` |
 | Combined | `UNSEEN FROM "person@example.com"` |
+
+Both search actions share the same lower-level fetch and MIME parser. Tests
+cover the complete action setting path: false performs a header-only
+`BODY.PEEK[HEADER]` fetch, while true performs bounded `BODY.PEEK[]` retrieval
+and returns `plain_text_body`, its compatibility alias `body_text`, and
+`body_truncated`.
 
 ### `email_ha.get_message`
 
@@ -246,13 +319,19 @@ metadata may still be sensitive.
 - Search order is newest UID first, which is normally arrival order but is not a
   universal date sort.
 - IMAP `SEARCH` dates have day resolution and are not Gmail web-search syntax.
+- Category and importance filters require Gmail's `X-GM-RAW` IMAP extension;
+  they are not offered as portable behavior for other IMAP servers.
+- Gmail's optional **Include starred in Primary** presentation setting is not
+  part of the `category:primary` classification query.
 - UIDs are folder-specific; no native Gmail thread object is exposed.
 - Header-only searches cannot report previews or attachment metadata without
   fetching message content.
 - Messages larger than the 2 MB retrieval cap are parsed on a best-effort basis
   and may report incomplete content or attachment metadata.
-- Safe HTML output, recent-hours search, thread reconstruction, diagnostics,
-  and expanded config-flow tests are deferred.
+- Last-received/today-count entities were not added because optional search
+  sensors already cover the count use cases without multiplying default
+  entities. Persistent multi-message event replay, safe HTML output,
+  recent-hours search, thread reconstruction, and diagnostics remain deferred.
 
 ## Development validation
 
