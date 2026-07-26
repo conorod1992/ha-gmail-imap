@@ -212,7 +212,7 @@ find_emails:
       description: Exclusive, date-based IMAP BEFORE filter.
       selector:
         date: {}
-    on:
+    "on":
       name: On date
       description: Date-based IMAP ON filter.
       selector:
