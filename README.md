@@ -160,9 +160,9 @@ Up to 20 may be configured per account to keep refresh work bounded.
 
 ### New-email automations
 
-Each account exposes a **New email** event entity on its Gmail device. In the
-automation editor choose **Event received**, select that entity, and select the
-`new_email` event type. For YAML automations:
+Each account exposes a **New email** event entity on its Gmail device. On Home
+Assistant 2026.7 or newer, choose **Event received** in the automation editor,
+select that entity, and select the `new_email` event type. For YAML automations:
 
 ```yaml
 triggers:
@@ -187,7 +187,8 @@ initial refresh has established a UID baseline.
 
 For backwards compatibility, the integration also continues to fire the raw
 `email_ha_new_email` bus event with the same payload. Existing automations using
-the **Manual event received** trigger do not need to change.
+the **Manual event received** trigger do not need to change; that trigger also
+remains the compatible option on older supported Home Assistant releases.
 
 ## Actions
 
