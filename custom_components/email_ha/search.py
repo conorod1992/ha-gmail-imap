@@ -36,6 +36,39 @@ READ_STATES = ("any", "unread", "read")
 STARRED_STATES = ("any", "starred", "not_starred")
 IMPORTANT_STATES = ("any", "important", "not_important")
 
+# Optional, explicit Inbox sensors. Gmail categories are server-side
+# classifications queried with X-GM-RAW; they are not IMAP folders.
+GMAIL_INBOX_SENSOR_PRESETS: dict[str, dict[str, Any]] = {
+    "primary_unread": {
+        "name": "Primary unread",
+        "filters": {"read_state": "unread", "gmail_category": "primary"},
+    },
+    "important_unread": {
+        "name": "Important unread",
+        "filters": {"read_state": "unread", "important_state": "important"},
+    },
+    "starred_unread": {
+        "name": "Starred unread",
+        "filters": {"read_state": "unread", "starred_state": "starred"},
+    },
+    "promotions_unread": {
+        "name": "Promotions unread",
+        "filters": {"read_state": "unread", "gmail_category": "promotions"},
+    },
+    "social_unread": {
+        "name": "Social unread",
+        "filters": {"read_state": "unread", "gmail_category": "social"},
+    },
+    "updates_unread": {
+        "name": "Updates unread",
+        "filters": {"read_state": "unread", "gmail_category": "updates"},
+    },
+    "forums_unread": {
+        "name": "Forums unread",
+        "filters": {"read_state": "unread", "gmail_category": "forums"},
+    },
+}
+
 
 def validate_imap_folder(value: Any) -> str:
     """Return a non-empty folder name without IMAP command controls."""

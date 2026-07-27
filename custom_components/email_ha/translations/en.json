@@ -40,6 +40,7 @@
         "title": "Gmail IMAP options",
         "menu_options": {
           "mailbox": "Mailbox settings",
+          "add_gmail_sensor": "Add Gmail inbox sensors",
           "add_search_sensor": "Add email search sensor",
           "remove_search_sensor": "Remove email search sensor"
         }
@@ -72,6 +73,13 @@
           "on": "On date"
         }
       },
+      "add_gmail_sensor": {
+        "title": "Add Gmail inbox sensors",
+        "description": "Choose optional sensors for reliable Gmail classifications in INBOX. Categories use Gmail's documented X-GM-RAW IMAP extension; Starred uses the standard IMAP Flagged state. No message bodies are fetched.",
+        "data": {
+          "presets": "Sensors"
+        }
+      },
       "remove_search_sensor": {
         "title": "Remove email search sensor",
         "data": {
@@ -80,13 +88,19 @@
       }
     },
     "error": {
-      "invalid_search_filters": "One or more search filters are invalid. Remove control characters and use valid dates."
+      "invalid_search_filters": "One or more search filters are invalid. Remove control characters and use valid dates.",
+      "gmail_sensors_already_configured": "All selected Gmail inbox sensors are already configured."
     },
     "abort": {
       "too_many_search_sensors": "The maximum of 20 email search sensors has been reached."
     }
   },
   "entity": {
+    "event": {
+      "new_email": {
+        "name": "New email"
+      }
+    },
     "sensor": {
       "unread_count": {
         "name": "Unread count"
