@@ -29,6 +29,7 @@ from .const import (
 )
 from .search import (
     GMAIL_CATEGORIES,
+    GMAIL_INBOX_SENSOR_PRESETS,
     IMPORTANT_STATES,
     READ_STATES,
     STARRED_STATES,
@@ -82,6 +83,25 @@ def _search_sensor_schema() -> vol.Schema:
             vol.Optional("since"): selector.DateSelector(),
             vol.Optional("before"): selector.DateSelector(),
             vol.Optional("on"): selector.DateSelector(),
+        }
+    )
+
+
+def _gmail_sensor_preset_schema() -> vol.Schema:
+    """Return the multi-select schema for optional Gmail Inbox sensors."""
+    options = [
+        selector.SelectOptionDict(value=key, label=str(preset["name"]))
+        for key, preset in GMAIL_INBOX_SENSOR_PRESETS.items()
+    ]
+    return vol.Schema(
+        {
+            vol.Required("presets"): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=options,
+                    multiple=True,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            )
         }
     )
 
@@ -194,7 +214,7 @@ class EmailIMAPOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Show the options menu."""
         del user_input
-        menu_options = ["mailbox", "add_search_sensor"]
+        menu_options = ["mailbox", "add_gmail_sensor", "add_search_sensor"]
         if self.config_entry.options.get(CONF_SEARCH_SENSORS):
             menu_options.append("remove_search_sensor")
         return self.async_show_menu(step_id="init", menu_options=menu_options)
@@ -255,6 +275,53 @@ class EmailIMAPOptionsFlow(OptionsFlow):
         return self.async_show_form(
             step_id="add_search_sensor",
             data_schema=_search_sensor_schema(),
+            errors=errors,
+        )
+
+    async def async_step_add_gmail_sensor(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Add one or more reliable Gmail Inbox sensor presets."""
+        sensors = list(self.config_entry.options.get(CONF_SEARCH_SENSORS, []))
+        if len(sensors) >= MAX_SEARCH_SENSORS:
+            return self.async_abort(reason="too_many_search_sensors")
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            selected = user_input["presets"]
+            if isinstance(selected, str):
+                selected = [selected]
+            configured = {
+                str(sensor.get("preset")) for sensor in sensors if sensor.get("preset")
+            }
+            new_presets = [
+                str(key)
+                for key in selected
+                if key in GMAIL_INBOX_SENSOR_PRESETS and key not in configured
+            ]
+            if not new_presets:
+                errors["base"] = "gmail_sensors_already_configured"
+            elif len(sensors) + len(new_presets) > MAX_SEARCH_SENSORS:
+                return self.async_abort(reason="too_many_search_sensors")
+            else:
+                for key in new_presets:
+                    preset = GMAIL_INBOX_SENSOR_PRESETS[key]
+                    filters = dict(preset["filters"])
+                    build_structured_search_tokens(filters)
+                    sensors.append(
+                        {
+                            "id": uuid4().hex,
+                            "name": str(preset["name"]),
+                            CONF_FOLDER: DEFAULT_FOLDER,
+                            "filters": filters,
+                            "preset": key,
+                        }
+                    )
+                return self._save_options({CONF_SEARCH_SENSORS: sensors})
+
+        return self.async_show_form(
+            step_id="add_gmail_sensor",
+            data_schema=_gmail_sensor_preset_schema(),
             errors=errors,
         )
 

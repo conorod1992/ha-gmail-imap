@@ -4,7 +4,7 @@ from __future__ import annotations
 
 DOMAIN = "email_ha"
 
-PLATFORMS = ["sensor"]
+PLATFORMS = ["event", "sensor"]
 
 CONF_EMAIL = "email"
 CONF_FOLDER = "folder"
@@ -58,3 +58,4 @@ MAX_HEADER_BYTES = 65536
 MAX_MESSAGE_BYTES = 2000000
 
 EVENT_NEW_EMAIL = "email_ha_new_email"
+EVENT_TYPE_NEW_EMAIL = "new_email"

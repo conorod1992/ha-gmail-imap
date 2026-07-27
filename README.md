@@ -33,7 +33,8 @@ authenticate a normal IMAP session. See Google's
 ## Features
 
 - unread, total, folder-count, and latest-email sensors;
-- `email_ha_new_email` event without complete message bodies;
+- discoverable New email event entity plus the backwards-compatible
+  `email_ha_new_email` bus event, without complete message bodies;
 - `email_ha.find_emails` for UI-friendly structured searches;
 - `email_ha.search_emails` for advanced raw IMAP searches;
 - `email_ha.get_message` for explicit folder-specific retrieval;
@@ -123,13 +124,33 @@ make the visible tab differ from a pure `category:primary` count.
 See Google's [IMAP extension documentation](https://developers.google.com/workspace/gmail/imap/imap-extensions)
 and [category behavior](https://support.google.com/mail/answer/3094499).
 
+The supported classifications map to IMAP as follows:
+
+| Gmail view | Reliable IMAP query | Notes |
+|---|---|---|
+| Primary | `X-GM-RAW "category:primary"` | Gmail classification, not a folder or flag |
+| Promotions | `X-GM-RAW "category:promotions"` | Gmail classification |
+| Social | `X-GM-RAW "category:social"` | Gmail classification |
+| Updates | `X-GM-RAW "category:updates"` | Gmail classification |
+| Forums | `X-GM-RAW "category:forums"` | Gmail classification |
+| Important | `X-GM-RAW "is:important"` | Gmail importance classification; Gmail also exposes labels through `X-GM-LABELS` |
+| Starred | `FLAGGED` | Standard IMAP `\Flagged` state |
+
+The category queries are reliable Gmail server-side classifications because
+Google documents both `X-GM-RAW` and the listed `category:` operators. They are
+Gmail-specific and are not presented as portable IMAP behavior.
+
 ### Optional email search sensors
 
-After connecting an account, open its **Configure** dialog and choose **Add
-email search sensor**. Each sensor has a user-facing name, folder, and the same
-structured filters as `find_emails`. For example, configure `RSA unread` with
-folder `INBOX`, From contains `rsa.ie`, and Read state `unread`; its state is
-the number of matching messages.
+After connecting an account, open its **Configure** dialog. Choose **Add Gmail
+inbox sensors** for convenient optional presets: Primary unread, Important
+unread, Starred unread, Promotions unread, Social unread, Updates unread, or
+Forums unread. Select only the sensors you want; none are created by default.
+
+Choose **Add email search sensor** for a custom sensor with a user-facing name,
+folder, and the same structured filters as `find_emails`. For example,
+configure `RSA unread` with folder `INBOX`, From contains `rsa.ie`, and Read
+state `unread`; its state is the number of matching messages.
 
 All optional sensors run through the account's existing coordinator and IMAP
 session. They use server-side `UID SEARCH`, count returned UIDs, and do not
@@ -137,9 +158,36 @@ fetch headers or message bodies. Their attributes contain only the folder,
 filter field names, and newest matching UID—not filter values or email bodies.
 Up to 20 may be configured per account to keep refresh work bounded.
 
-`email_ha_new_email` fires when a newer folder UID is observed after the initial
-refresh. Its payload includes account/folder and the same bounded metadata used
-by polling, never a complete body.
+### New-email automations
+
+Each account exposes a **New email** event entity on its Gmail device. In the
+automation editor choose **Event received**, select that entity, and select the
+`new_email` event type. For YAML automations:
+
+```yaml
+triggers:
+  - trigger: event.received
+    target:
+      entity_id: event.gmail_example_new_email
+    options:
+      event_type:
+        - new_email
+actions:
+  - action: persistent_notification.create
+    data:
+      title: New email
+      message: >-
+        {{ trigger.to_state.attributes.subject or '(no subject)' }}
+```
+
+Replace the example entity ID with the entity created for your account. The
+event entity exposes bounded attributes including account, folder, UID,
+subject, sender, and date, never a complete body. It fires only after the
+initial refresh has established a UID baseline.
+
+For backwards compatibility, the integration also continues to fire the raw
+`email_ha_new_email` bus event with the same payload. Existing automations using
+the **Manual event received** trigger do not need to change.
 
 ## Actions
 
@@ -319,8 +367,8 @@ metadata may still be sensitive.
 - Search order is newest UID first, which is normally arrival order but is not a
   universal date sort.
 - IMAP `SEARCH` dates have day resolution and are not Gmail web-search syntax.
-- Category and importance filters require Gmail's `X-GM-RAW` IMAP extension;
-  they are not offered as portable behavior for other IMAP servers.
+- Category and importance filters require Gmail's documented `X-GM-RAW` IMAP
+  extension; they are not offered as portable behavior for other IMAP servers.
 - Gmail's optional **Include starred in Primary** presentation setting is not
   part of the `category:primary` classification query.
 - UIDs are folder-specific; no native Gmail thread object is exposed.
