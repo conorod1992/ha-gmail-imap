@@ -1,57 +1,156 @@
 # pyright: reportAttributeAccessIssue=false
-"""Tests for bounded, duplicate-resistant new-mail events."""
+"""Tests for UIDVALIDITY-aware, bounded new-email detection."""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import AsyncMock
 
-from custom_components.email_ha.const import EVENT_NEW_EMAIL
-from custom_components.email_ha.coordinator import EmailData, EmailDataUpdateCoordinator
+import pytest
+
+from custom_components.email_ha.coordinator import EmailDataUpdateCoordinator
 
 
-def _coordinator_for_events() -> EmailDataUpdateCoordinator:
+def _coordinator(account: str = "user@example.com") -> EmailDataUpdateCoordinator:
     coordinator = object.__new__(EmailDataUpdateCoordinator)
-    coordinator.hass = SimpleNamespace(bus=SimpleNamespace(async_fire=Mock()))
-    coordinator._email = "user@example.com"  # noqa: SLF001
+    coordinator._email = account  # noqa: SLF001
     coordinator._folder = "INBOX"  # noqa: SLF001
-    coordinator._last_uid = None  # noqa: SLF001
-    coordinator.config_entry = SimpleNamespace(entry_id="entry-1")
+    coordinator._event_baseline_ready = False  # noqa: SLF001
+    coordinator._uid_validity = None  # noqa: SLF001
+    coordinator._last_seen_uid = 0  # noqa: SLF001
+    coordinator.enabled_gmail_entities = {"new_email"}
+    coordinator._new_email_listeners = set()  # noqa: SLF001
     return coordinator
 
 
-def _data(uid: str) -> EmailData:
-    return EmailData(
-        emails=[
-            {
-                "uid": uid,
-                "subject": "Example",
-                "sender_name": "Sender",
-                "sender_email": "sender@example.com",
-                "preview": "",
-            }
-        ]
+def _message(uid: str) -> dict:
+    return {
+        "uid": uid,
+        "message_id": f"<{uid}@example.com>",
+        "subject": f"Message {uid}",
+        "sender": {"name": "Sender", "address": "sender@example.com"},
+        "date": "2026-07-28T10:00:00+00:00",
+    }
+
+
+@pytest.mark.asyncio
+async def test_initial_mailbox_baseline_emits_nothing() -> None:
+    """Existing mail establishes UIDVALIDITY/UIDNEXT without a search."""
+    coordinator = _coordinator()
+    client = AsyncMock()
+
+    result = await coordinator._async_detect_new_emails(  # noqa: SLF001
+        client, {"uidvalidity": 7, "uidnext": 11}
     )
 
-
-def test_initial_refresh_does_not_flood_new_email_events() -> None:
-    """Existing mail establishes the baseline without firing an event."""
-    coordinator = _coordinator_for_events()
-
-    coordinator._fire_new_email_event(_data("10"))  # noqa: SLF001
-
-    coordinator.hass.bus.async_fire.assert_not_called()
+    assert result == []
+    assert coordinator._last_seen_uid == 10  # noqa: SLF001
+    client.get_new_emails.assert_not_awaited()
 
 
-def test_refreshes_do_not_duplicate_new_email_events() -> None:
-    """A newly observed UID fires once and ordinary refreshes remain quiet."""
-    coordinator = _coordinator_for_events()
-    coordinator._fire_new_email_event(_data("10"))  # noqa: SLF001
-    coordinator._fire_new_email_event(_data("11"))  # noqa: SLF001
-    coordinator._fire_new_email_event(_data("11"))  # noqa: SLF001
+@pytest.mark.asyncio
+async def test_one_new_message_is_detected_once() -> None:
+    """A UID above the baseline is returned and advances the baseline."""
+    coordinator = _coordinator()
+    client = AsyncMock()
+    await coordinator._async_detect_new_emails(  # noqa: SLF001
+        client, {"uidvalidity": 7, "uidnext": 11}
+    )
+    client.get_new_emails.return_value = ([_message("11")], 1)
 
-    coordinator.hass.bus.async_fire.assert_called_once()
-    event_type, event_data = coordinator.hass.bus.async_fire.call_args.args
-    assert event_type == EVENT_NEW_EMAIL
-    assert event_data["uid"] == "11"
-    assert "plain_text_body" not in event_data
+    first = await coordinator._async_detect_new_emails(  # noqa: SLF001
+        client, {"uidvalidity": 7, "uidnext": 12}
+    )
+    second = await coordinator._async_detect_new_emails(  # noqa: SLF001
+        client, {"uidvalidity": 7, "uidnext": 12}
+    )
+
+    assert [message["uid"] for message in first] == ["11"]
+    assert second == []
+    client.get_new_emails.assert_awaited_once_with("INBOX", 10, 25)
+
+
+@pytest.mark.asyncio
+async def test_deleting_newest_does_not_report_older_mail() -> None:
+    """Unchanged UIDNEXT stays quiet even when mailbox contents shrink."""
+    coordinator = _coordinator()
+    client = AsyncMock()
+    await coordinator._async_detect_new_emails(  # noqa: SLF001
+        client, {"uidvalidity": 7, "uidnext": 50}
+    )
+
+    assert (
+        await coordinator._async_detect_new_emails(  # noqa: SLF001
+            client, {"uidvalidity": 7, "uidnext": 50, "messages": 2}
+        )
+        == []
+    )
+    client.get_new_emails.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_disabled_event_advances_without_fetching_headers() -> None:
+    """An unselected New email entity does not cause unsolicited header fetches."""
+    coordinator = _coordinator()
+    coordinator.enabled_gmail_entities = set()
+    client = AsyncMock()
+    await coordinator._async_detect_new_emails(  # noqa: SLF001
+        client, {"uidvalidity": 7, "uidnext": 10}
+    )
+
+    result = await coordinator._async_detect_new_emails(  # noqa: SLF001
+        client, {"uidvalidity": 7, "uidnext": 12}
+    )
+
+    assert result == []
+    assert coordinator._last_seen_uid == 11  # noqa: SLF001
+    client.get_new_emails.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reconnect_does_not_replay_and_uidvalidity_reset_rebaselines() -> None:
+    """The coordinator retains its baseline and safely resets on UID generation change."""
+    coordinator = _coordinator()
+    client = AsyncMock()
+    await coordinator._async_detect_new_emails(  # noqa: SLF001
+        client, {"uidvalidity": 7, "uidnext": 50}
+    )
+
+    reconnect = await coordinator._async_detect_new_emails(  # noqa: SLF001
+        client, {"uidvalidity": 7, "uidnext": 50}
+    )
+    reset = await coordinator._async_detect_new_emails(  # noqa: SLF001
+        client, {"uidvalidity": 8, "uidnext": 4}
+    )
+
+    assert reconnect == []
+    assert reset == []
+    assert coordinator._last_seen_uid == 3  # noqa: SLF001
+
+
+def test_multiple_events_are_delivered_oldest_to_newest_without_bodies() -> None:
+    """Each arrival becomes one privacy-conscious EventEntity payload."""
+    coordinator = _coordinator()
+    received: list[dict] = []
+    coordinator.async_add_new_email_listener(received.append)
+
+    coordinator._notify_new_emails([_message("11"), _message("12")])  # noqa: SLF001
+
+    assert [event["uid"] for event in received] == ["11", "12"]
+    assert received[0]["account"] == "user@example.com"
+    assert received[0]["sender_address"] == "sender@example.com"
+    assert "plain_text_body" not in received[0]
+
+
+def test_account_listeners_are_isolated() -> None:
+    """Separate coordinators cannot deliver events to another account entity."""
+    first = _coordinator("first@example.com")
+    second = _coordinator("second@example.com")
+    first_events: list[dict] = []
+    second_events: list[dict] = []
+    first.async_add_new_email_listener(first_events.append)
+    second.async_add_new_email_listener(second_events.append)
+
+    first._notify_new_emails([_message("1")])  # noqa: SLF001
+
+    assert len(first_events) == 1
+    assert second_events == []

@@ -94,7 +94,7 @@ async def test_search_include_body_uses_body_peek_and_limit() -> None:
     client._client = protocol  # noqa: SLF001
 
     result = await client.search_emails(
-        "INBOX", "ALL", 10, include_full_body=True, body_max_chars=4
+        "INBOX", "ALL", 10, include_body=True, body_max_chars=4
     )
 
     protocol.uid.assert_awaited_once_with(
@@ -154,7 +154,7 @@ async def test_folder_control_characters_are_rejected() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_message_uses_read_only_body_peek() -> None:
+async def test_get_email_contents_uses_read_only_body_peek() -> None:
     """Explicit retrieval uses PEEK and preserves the unread state."""
     protocol = AsyncMock()
     protocol.examine.return_value = _Response("OK", [b"1"])
@@ -169,7 +169,7 @@ async def test_get_message_uses_read_only_body_peek() -> None:
     client = ImapClient("imap.gmail.com")
     client._client = protocol  # noqa: SLF001
 
-    result = await client.get_message("INBOX", "7", body_max_chars=100)
+    result = await client.get_email_contents("INBOX", "7", body_max_chars=100)
 
     protocol.examine.assert_awaited_once_with("INBOX")
     protocol.uid.assert_awaited_once_with(
@@ -178,3 +178,50 @@ async def test_get_message_uses_read_only_body_peek() -> None:
     assert result["plain_text_body"] == "Body"
     assert result["flags"] == [r"\Seen"]
     assert result["body_truncated"] is False
+
+
+@pytest.mark.asyncio
+async def test_folder_status_includes_uid_generation_metadata() -> None:
+    """UIDVALIDITY and UIDNEXT support safe event baselines."""
+    protocol = AsyncMock()
+    protocol.status.return_value = _Response(
+        "OK", [b'"INBOX" (MESSAGES 4 UNSEEN 2 UIDVALIDITY 77 UIDNEXT 101)']
+    )
+    client = ImapClient("imap.gmail.com")
+    client._client = protocol  # noqa: SLF001
+
+    status = await client.get_folder_status("INBOX")
+
+    assert status == {
+        "messages": 4,
+        "unseen": 2,
+        "uidvalidity": 77,
+        "uidnext": 101,
+    }
+    protocol.status.assert_awaited_once_with(
+        "INBOX", "(MESSAGES UNSEEN UIDVALIDITY UIDNEXT)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_new_email_fetch_is_bounded_and_uid_ordered() -> None:
+    """Large bursts emit the newest bounded window from oldest UID to newest."""
+    protocol = AsyncMock()
+    protocol.examine.return_value = _Response("OK", [b"30"])
+    protocol.uid_search.return_value = _Response(
+        "OK", [" ".join(str(uid) for uid in range(11, 41)).encode()]
+    )
+    protocol.uid.side_effect = [
+        _Response("OK", [f"1 (UID {uid})".encode(), f"Subject: {uid}\r\n\r\n".encode()])
+        for uid in range(16, 41)
+    ]
+    client = ImapClient("imap.gmail.com")
+    client._client = protocol  # noqa: SLF001
+
+    messages, total = await client.get_new_emails("INBOX", 10, 25)
+
+    assert total == 30
+    assert [message["uid"] for message in messages] == [
+        str(uid) for uid in range(16, 41)
+    ]
+    protocol.uid_search.assert_awaited_once_with("UID", "11:*", charset=None)
