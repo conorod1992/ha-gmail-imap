@@ -1,8 +1,9 @@
-"""DataUpdateCoordinator for Email IMAP."""
+"""Shared Gmail IMAP coordinator with IDLE and bounded event tracking."""
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import contextlib
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -12,19 +13,22 @@ from typing import Any
 
 import aioimaplib
 
-from homeassistant.core import HomeAssistant
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.config_entry_oauth2_flow import OAuth2Session
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    DEFAULT_FOLDER,
     DOMAIN,
-    EVENT_NEW_EMAIL,
-    IDLE_FALLBACK_POLL_INTERVAL,
+    IDLE_FALLBACK_REFRESH_INTERVAL,
     IDLE_PUSH_WAIT_TIMEOUT,
     IDLE_RECONNECT_DELAYS,
-    POLL_FETCH_COUNT,
+    LATEST_EMAIL_FETCH_COUNT,
+    MAX_NEW_EMAIL_EVENTS,
 )
+from .gmail import GMAIL_SEARCH_DEFINITIONS
 from .imap_client import ImapAuthError, ImapClient, ImapClientError
 from .search import build_structured_search_tokens
 
@@ -33,93 +37,97 @@ _LOGGER = logging.getLogger(__name__)
 _FOLDER_REFRESH_INTERVAL = 86400
 
 
-@dataclass
+@dataclass(slots=True)
 class SearchCountData:
-    """Bounded state for one user-defined search sensor."""
+    """Bounded state for one server-side count sensor."""
 
     count: int | None = None
     newest_uid: str | None = None
 
 
-@dataclass
+@dataclass(slots=True)
 class EmailData:
-    """Holds the polled email state for one account/folder."""
+    """Current read-only mailbox state for one account."""
 
     emails: list[dict[str, Any]] = field(default_factory=list)
-    unread_count: int = 0
-    total_count: int = 0
+    inbox_unread: int = 0
+    inbox_total: int = 0
     folders: list[str] = field(default_factory=list)
-    search_counts: dict[str, SearchCountData] = field(default_factory=dict)
+    gmail_counts: dict[str, SearchCountData] = field(default_factory=dict)
+    custom_counts: dict[str, SearchCountData] = field(default_factory=dict)
+    new_emails: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def latest_email(self) -> dict[str, Any] | None:
-        """Return the most-recent email, or None if empty."""
+        """Return the most recently received message metadata."""
         return self.emails[0] if self.emails else None
-
-    @property
-    def latest_uid(self) -> str | None:
-        """UID of the most-recent email (used to detect new mail)."""
-        latest = self.latest_email
-        return latest["uid"] if latest else None
 
 
 class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
-    """Manages IMAP IDLE push updates with a 15-min fallback poll."""
+    """Manage one shared IMAP connection per refresh and an IDLE task."""
 
     def __init__(
         self,
         *,
         hass: HomeAssistant,
+        config_entry: ConfigEntry,
         oauth_session: OAuth2Session,
         email_address: str,
         imap_host: str,
         imap_port: int,
         folder: str,
-        scan_interval: int,
-        search_sensors: list[dict[str, Any]] | None = None,
+        enabled_gmail_entities: set[str] | None = None,
+        custom_sensors: list[dict[str, Any]] | None = None,
     ) -> None:
         self.oauth_session = oauth_session
         self._email = email_address
         self._imap_host = imap_host
         self._imap_port = imap_port
         self._folder = folder
-        self._scan_interval = scan_interval
-        self.search_sensors = search_sensors or []
-        self._last_uid: str | None = None
+        self.enabled_gmail_entities = enabled_gmail_entities or set()
+        self.custom_sensors = custom_sensors or []
         self.last_success_time: datetime | None = None
-        self._idle_task: asyncio.Task | None = None
+        self._idle_task: asyncio.Task[None] | None = None
         self._cached_folders: list[str] = []
-        self._folders_fetched_at: float = 0.0
+        self._folders_fetched_at = 0.0
+        self._event_baseline_ready = False
+        self._uid_validity: int | None = None
+        self._last_seen_uid = 0
+        self._update_lock = asyncio.Lock()
+        self._new_email_listeners: set[Callable[[dict[str, Any]], None]] = set()
 
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=config_entry,
             name=f"{DOMAIN}:{email_address}",
-            update_interval=timedelta(seconds=IDLE_FALLBACK_POLL_INTERVAL),
+            update_interval=timedelta(seconds=IDLE_FALLBACK_REFRESH_INTERVAL),
         )
 
     @property
     def folder(self) -> str:
-        """Return the monitored folder name."""
+        """Return the folder used by Latest email and New email."""
         return self._folder
 
-    @property
-    def scan_interval(self) -> int:
-        """Return the configured polling interval in seconds."""
-        return self._scan_interval
+    @callback
+    def async_add_new_email_listener(
+        self, listener: Callable[[dict[str, Any]], None]
+    ) -> Callable[[], None]:
+        """Register an EventEntity listener without exposing a bus event."""
+        self._new_email_listeners.add(listener)
+
+        @callback
+        def remove_listener() -> None:
+            self._new_email_listeners.discard(listener)
+
+        return remove_listener
 
     async def _async_ensure_fresh_token(self) -> str:
-        """Proactively refresh OAuth token and return the access token string."""
+        """Proactively refresh OAuth and return an access token."""
         try:
             token: dict[str, Any] = self.oauth_session.token
             expires_in = token.get("expires_at", 0) - time.time()
-            _LOGGER.debug("Token expires in %.0fs for %s", expires_in, self._email)
             if expires_in < 600 and self.config_entry is not None:
-                _LOGGER.debug(
-                    "Proactively refreshing token for %s (%.0fs remaining)",
-                    self._email,
-                    expires_in,
-                )
                 self.hass.config_entries.async_update_entry(
                     self.config_entry,
                     data={
@@ -130,214 +138,215 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             await self.oauth_session.async_ensure_token_valid()
         except Exception as err:
             _LOGGER.warning(
-                "Token refresh failed for %s: %s: %s",
-                self._email,
-                type(err).__name__,
-                err,
+                "Token refresh failed for %s: %s", self._email, type(err).__name__
             )
             raise ConfigEntryAuthFailed(
-                f"Token refresh failed for {self._email}: {type(err).__name__}: {err}"
+                f"Token refresh failed for {self._email}: {type(err).__name__}"
             ) from err
         raw = self.oauth_session.token["access_token"]
         return raw.decode() if isinstance(raw, bytes) else str(raw)
 
+    async def _async_detect_new_emails(
+        self, client: ImapClient, status: dict[str, int]
+    ) -> list[dict[str, Any]]:
+        """Detect new UIDs using UIDVALIDITY and UIDNEXT monotonic semantics."""
+        uid_validity = status.get("uidvalidity")
+        current_highest_uid = max(0, status.get("uidnext", 1) - 1)
+
+        if not self._event_baseline_ready or uid_validity != self._uid_validity:
+            self._event_baseline_ready = True
+            self._uid_validity = uid_validity
+            self._last_seen_uid = current_highest_uid
+            return []
+
+        if current_highest_uid <= self._last_seen_uid:
+            return []
+
+        if "new_email" not in self.enabled_gmail_entities:
+            self._last_seen_uid = current_highest_uid
+            return []
+
+        messages, match_count = await client.get_new_emails(
+            self._folder, self._last_seen_uid, MAX_NEW_EMAIL_EVENTS
+        )
+        self._last_seen_uid = current_highest_uid
+        if match_count > MAX_NEW_EMAIL_EVENTS:
+            _LOGGER.warning(
+                "Received %d messages between updates for %s; emitting the newest %d",
+                match_count,
+                self._email,
+                MAX_NEW_EMAIL_EVENTS,
+            )
+        return messages
+
     async def _async_fetch_data(self, client: ImapClient) -> EmailData:
-        """Fetch current email state from an already-connected client."""
-        status = await client.get_folder_status(self._folder)
+        """Fetch all enabled state through one connected client."""
+        monitored_status = await client.get_folder_status(self._folder)
+        inbox_status = (
+            monitored_status
+            if self._folder.upper() == DEFAULT_FOLDER
+            else await client.get_folder_status(DEFAULT_FOLDER)
+        )
         if time.monotonic() - self._folders_fetched_at > _FOLDER_REFRESH_INTERVAL:
             self._cached_folders = await client.list_folders()
             self._folders_fetched_at = time.monotonic()
-        emails = await client.search_emails(self._folder, "ALL", POLL_FETCH_COUNT)
-        search_counts: dict[str, SearchCountData] = {}
-        for monitor in self.search_sensors:
-            monitor_id = str(monitor.get("id", ""))
-            if not monitor_id:
+
+        emails = (
+            await client.search_emails(self._folder, "ALL", LATEST_EMAIL_FETCH_COUNT)
+            if "latest_email" in self.enabled_gmail_entities
+            else []
+        )
+        gmail_counts: dict[str, SearchCountData] = {}
+        for definition in GMAIL_SEARCH_DEFINITIONS:
+            if definition.key not in self.enabled_gmail_entities:
+                continue
+            tokens = build_structured_search_tokens(definition.filters)
+            count, newest_uid = await client.count_emails(DEFAULT_FOLDER, tokens)
+            gmail_counts[definition.key] = SearchCountData(count, newest_uid)
+
+        custom_counts: dict[str, SearchCountData] = {}
+        for sensor in self.custom_sensors:
+            sensor_id = str(sensor.get("id", ""))
+            if not sensor_id:
                 continue
             try:
-                tokens = build_structured_search_tokens(monitor.get("filters", {}))
+                tokens = build_structured_search_tokens(sensor.get("filters", {}))
                 count, newest_uid = await client.count_emails(
-                    str(monitor.get("folder", self._folder)), tokens
+                    str(sensor.get("folder", DEFAULT_FOLDER)), tokens
                 )
             except (ImapClientError, ValueError) as err:
                 _LOGGER.warning(
-                    "Unable to update search sensor %s for %s: %s",
-                    monitor_id,
+                    "Unable to update custom sensor %s for %s: %s",
+                    sensor_id,
                     self._email,
                     type(err).__name__,
                 )
-                search_counts[monitor_id] = SearchCountData()
+                custom_counts[sensor_id] = SearchCountData()
             else:
-                search_counts[monitor_id] = SearchCountData(count, newest_uid)
+                custom_counts[sensor_id] = SearchCountData(count, newest_uid)
+
+        new_emails = await self._async_detect_new_emails(client, monitored_status)
         self.last_success_time = datetime.now(timezone.utc)
-        _LOGGER.debug(
-            "Fetched %d emails for %s (%d unread)",
-            len(emails),
-            self._email,
-            status.get("unseen", 0),
-        )
         return EmailData(
             emails=emails,
-            unread_count=status.get("unseen", 0),
-            total_count=status.get("messages", 0),
+            inbox_unread=inbox_status.get("unseen", 0),
+            inbox_total=inbox_status.get("messages", 0),
             folders=self._cached_folders,
-            search_counts=search_counts,
+            gmail_counts=gmail_counts,
+            custom_counts=custom_counts,
+            new_emails=new_emails,
         )
 
-    async def _async_update_data(self) -> EmailData:
-        """Short-lived connection poll; fallback when IDLE is not running."""
-        access_token = await self._async_ensure_fresh_token()
-        try:
-            async with ImapClient(self._imap_host, self._imap_port) as client:
-                await client.connect(self._email, access_token)
-                data = await self._async_fetch_data(client)
-        except ImapAuthError as err:
-            _LOGGER.warning("IMAP auth error for %s: %s", self._email, err)
-            raise ConfigEntryAuthFailed(str(err)) from err
-        except Exception as err:
-            _LOGGER.warning(
-                "IMAP error for %s: %s: %s", self._email, type(err).__name__, err
-            )
-            raise UpdateFailed(
-                f"IMAP error for {self._email}: {type(err).__name__}: {err}"
-            ) from err
+    @callback
+    def _notify_new_emails(self, messages: list[dict[str, Any]]) -> None:
+        """Deliver privacy-conscious payloads oldest UID to newest UID."""
+        for message in messages:
+            sender = message.get("sender") or {}
+            payload = {
+                "account": self._email,
+                "folder": self._folder,
+                "uid": message.get("uid"),
+                "message_id": message.get("message_id"),
+                "subject": message.get("subject"),
+                "sender_name": sender.get("name", ""),
+                "sender_address": sender.get("address", ""),
+                "date": message.get("date"),
+            }
+            for listener in tuple(self._new_email_listeners):
+                listener(payload)
 
-        self._fire_new_email_event(data)
+    async def _async_update_data(self) -> EmailData:
+        """Run the internal fallback refresh used when IDLE misses an update."""
+        async with self._update_lock:
+            access_token = await self._async_ensure_fresh_token()
+            try:
+                async with ImapClient(self._imap_host, self._imap_port) as client:
+                    await client.connect(self._email, access_token)
+                    data = await self._async_fetch_data(client)
+            except ImapAuthError as err:
+                raise ConfigEntryAuthFailed(str(err)) from err
+            except Exception as err:
+                raise UpdateFailed(
+                    f"IMAP error for {self._email}: {type(err).__name__}"
+                ) from err
+
+        self._notify_new_emails(data.new_emails)
         return data
 
     def start_idle(self) -> None:
-        """Start the IDLE background task (idempotent)."""
+        """Start the IDLE background task."""
         if self._idle_task is not None:
             return
         self._idle_task = self.hass.async_create_background_task(
-            self._async_idle_loop(),
-            name=f"{DOMAIN}:idle:{self._email}",
+            self._async_idle_loop(), name=f"{DOMAIN}:idle:{self._email}"
         )
-        _LOGGER.debug("IDLE task started for %s", self._email)
 
     async def stop_idle(self) -> None:
-        """Cancel the IDLE task and wait for clean shutdown."""
-        if self._idle_task is not None:
-            self._idle_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._idle_task
-            self._idle_task = None
-            _LOGGER.debug("IDLE task stopped for %s", self._email)
+        """Cancel IDLE and wait for a clean shutdown."""
+        if self._idle_task is None:
+            return
+        self._idle_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await self._idle_task
+        self._idle_task = None
 
     async def _async_idle_loop(self) -> None:
-        """Outer IDLE loop: reconnect with exponential backoff on transient errors."""
-        _LOGGER.debug("IDLE loop starting for %s", self._email)
+        """Reconnect IDLE with bounded exponential backoff."""
         reconnect_attempt = 0
         while True:
-            _LOGGER.debug("IDLE attempt %d for %s", reconnect_attempt, self._email)
             reconnect_attempt = await self._async_idle_attempt(reconnect_attempt)
 
     async def _async_idle_attempt(self, reconnect_attempt: int) -> int:
-        """Run one session attempt; return updated reconnect counter."""
+        """Run one IDLE session attempt."""
         try:
             await self._async_run_idle_session()
         except ConfigEntryAuthFailed:
-            _LOGGER.error("IDLE auth permanently failed for %s", self._email)
             raise
         except asyncio.CancelledError:
             raise
         except (OSError, aioimaplib.AioImapException, ImapClientError) as err:
-            idx = min(reconnect_attempt, len(IDLE_RECONNECT_DELAYS) - 1)
-            delay = IDLE_RECONNECT_DELAYS[idx]
+            delay = IDLE_RECONNECT_DELAYS[
+                min(reconnect_attempt, len(IDLE_RECONNECT_DELAYS) - 1)
+            ]
             _LOGGER.warning(
-                "IDLE error for %s: %s: %s — reconnecting in %ds",
+                "IDLE error for %s: %s; reconnecting in %ds",
                 self._email,
                 type(err).__name__,
-                err,
                 delay,
             )
             await asyncio.sleep(delay)
             return reconnect_attempt + 1
-        else:
-            return 0  # clean exit (token refresh) — reset backoff
+        return 0
 
     async def _async_run_idle_session(self) -> None:
-        """One IDLE session: connect, fetch, then IDLE until token nears expiry."""
-        _LOGGER.debug("IDLE session: refreshing token for %s", self._email)
+        """Connect once, refresh after pushes, and renew before token expiry."""
         access_token = await self._async_ensure_fresh_token()
         token_expires_at: float = self.oauth_session.token.get("expires_at", 0)
-        _LOGGER.debug(
-            "IDLE session: connecting for %s (token valid for %.0fs)",
-            self._email,
-            token_expires_at - time.time(),
-        )
-
         client = ImapClient(self._imap_host, self._imap_port)
         try:
             await client.connect(self._email, access_token)
-            _LOGGER.debug("IDLE session: connected for %s", self._email)
-
             while True:
                 if time.time() > token_expires_at - 600:
-                    _LOGGER.debug(
-                        "Token nearing expiry for %s — reconnecting IDLE", self._email
-                    )
                     return
+                async with self._update_lock:
+                    data = await self._async_fetch_data(client)
+                    self.async_set_updated_data(data)
+                    self._notify_new_emails(data.new_emails)
 
-                data = await self._async_fetch_data(client)
-                self.async_set_updated_data(data)
-                self._fire_new_email_event(data)
-
-                time_until_expiry = token_expires_at - time.time()
                 idle_timeout = min(
                     float(IDLE_PUSH_WAIT_TIMEOUT),
-                    max(60.0, time_until_expiry - 60),
+                    max(60.0, token_expires_at - time.time() - 60),
                 )
-                _LOGGER.debug(
-                    "IDLE waiting for %s (timeout=%.0fs)", self._email, idle_timeout
-                )
-                push_lines = await client.idle_wait(idle_timeout)
-
-                if push_lines and any(
-                    b"EXISTS" in line or b"EXPUNGE" in line for line in push_lines
-                ):
-                    _LOGGER.debug("IDLE push for %s: %s", self._email, push_lines)
-                elif push_lines:
-                    _LOGGER.debug(
-                        "IDLE push ignored for %s: %s", self._email, push_lines
-                    )
-                else:
-                    _LOGGER.debug("IDLE timeout for %s", self._email)
-
+                await client.select_folder_read_only(self._folder)
+                await client.idle_wait(idle_timeout)
         except ImapAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         finally:
             await client.disconnect()
 
-    def _fire_new_email_event(self, data: EmailData) -> None:
-        """Fire EVENT_NEW_EMAIL when the latest UID has changed."""
-        new_uid = data.latest_uid
-        if new_uid and new_uid != self._last_uid:
-            if self._last_uid is not None:
-                latest = data.latest_email or {}
-                self.hass.bus.async_fire(
-                    EVENT_NEW_EMAIL,
-                    {
-                        "email_address": self._email,
-                        "account": self._email,
-                        "config_entry_id": (
-                            self.config_entry.entry_id if self.config_entry else None
-                        ),
-                        "folder": self._folder,
-                        "uid": latest.get("uid"),
-                        "message_id": latest.get("message_id"),
-                        "subject": latest.get("subject"),
-                        "sender": latest.get("sender"),
-                        "sender_name": latest.get("sender_name"),
-                        "sender_email": latest.get("sender_email"),
-                        "date": latest.get("date"),
-                        "preview": latest.get("preview", ""),
-                    },
-                )
-            self._last_uid = new_uid
-
 
 def coordinator_from_entry(
     hass: HomeAssistant, entry_id: str
 ) -> EmailDataUpdateCoordinator | None:
-    """Return the coordinator for entry_id, or None if not found."""
+    """Return the coordinator for a config entry."""
     return hass.data.get(DOMAIN, {}).get(entry_id)

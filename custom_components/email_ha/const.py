@@ -1,4 +1,4 @@
-"""Constants for the Email IMAP integration."""
+"""Constants for Email HA."""
 
 from __future__ import annotations
 
@@ -8,42 +8,38 @@ PLATFORMS = ["event", "sensor"]
 
 CONF_EMAIL = "email"
 CONF_FOLDER = "folder"
-CONF_SCAN_INTERVAL = "scan_interval"
-CONF_SEARCH_SENSORS = "search_sensors"
+CONF_GMAIL_ENTITIES = "gmail_entities"
+CONF_CUSTOM_SENSORS = "custom_sensors"
+CONF_MONITORED_FOLDER = "monitored_folder"
 
 GMAIL_IMAP_HOST = "imap.gmail.com"
 GMAIL_IMAP_PORT = 993
 GMAIL_SCOPES = "https://mail.google.com/"
 
 DEFAULT_FOLDER = "INBOX"
-DEFAULT_SCAN_INTERVAL = 300
-POLL_FETCH_COUNT = 3
+LATEST_EMAIL_FETCH_COUNT = 3
 UNAVAILABLE_AFTER_SECONDS = 900
 
-# IMAP IDLE
+# IMAP IDLE and the internal resilience refresh. IDLE is the normal update path.
 IDLE_PUSH_WAIT_TIMEOUT = 10 * 60
 IDLE_RECONNECT_DELAYS = [5, 10, 20, 40, 80, 120]
-IDLE_FALLBACK_POLL_INTERVAL = 900
+IDLE_FALLBACK_REFRESH_INTERVAL = 15 * 60
+MAX_NEW_EMAIL_EVENTS = 25
 
-# Sensor attribute keys
-ATTR_SUBJECT = "subject"
+# Entity attribute keys
 ATTR_SENDER_NAME = "sender_name"
-ATTR_SENDER_EMAIL = "sender_email"
+ATTR_SENDER_ADDRESS = "sender_address"
 ATTR_DATE = "date"
 ATTR_UID = "uid"
-ATTR_EMAILS = "emails"
 ATTR_FOLDER = "folder"
 
-# Service names
-SERVICE_QUERY_EMAILS = "query_emails"
-SERVICE_SEARCH_EMAILS = "search_emails"
+# Action names and common fields
 SERVICE_FIND_EMAILS = "find_emails"
-SERVICE_GET_MESSAGE = "get_message"
+SERVICE_SEARCH_EMAILS = "search_emails"
+SERVICE_GET_EMAIL_CONTENTS = "get_email_contents"
 SERVICE_ATTR_FOLDER = "folder"
 SERVICE_ATTR_SEARCH_CRITERIA = "search_criteria"
 SERVICE_ATTR_MAX_RESULTS = "max_results"
-SERVICE_ATTR_INCLUDE_FULL_BODY = "include_full_body"
-SERVICE_ATTR_INCLUDE_ATTACHMENTS = "include_attachments"
 
 DEFAULT_SEARCH_RESULTS = 10
 MAX_SEARCH_RESULTS = 25
@@ -52,10 +48,9 @@ DEFAULT_MESSAGE_BODY_CHARS = 12000
 MAX_BODY_CHARS = 20000
 MAX_SEARCH_CRITERIA_CHARS = 1000
 MAX_SEARCH_TOKENS = 40
-MAX_SEARCH_SENSORS = 20
+MAX_CUSTOM_SENSORS = 20
 IMAP_TIMEOUT = 30
 MAX_HEADER_BYTES = 65536
 MAX_MESSAGE_BYTES = 2000000
 
-EVENT_NEW_EMAIL = "email_ha_new_email"
 EVENT_TYPE_NEW_EMAIL = "new_email"

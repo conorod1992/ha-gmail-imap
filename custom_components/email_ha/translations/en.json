@@ -1,131 +1,72 @@
 {
+  "application_credentials": {
+    "description": "Follow the [Email HA Google sign-in guide]({documentation_url}). Configure the [OAuth consent screen]({consent_url}), then create a Web application OAuth client under [Credentials]({credentials_url}). The Gmail REST API does not need to be enabled."
+  },
   "config": {
     "step": {
       "user": {
-        "title": "Set up Gmail IMAP",
-        "description": "Enter your Gmail address. You will be redirected to Google to authorise access.\n\nBefore continuing, ensure IMAP is enabled in your Gmail settings and you have configured an OAuth2 application with the Gmail IMAP scope.",
-        "data": {
-          "email": "Gmail address"
-        }
+        "title": "Connect a Gmail account",
+        "description": "Enter the Gmail account you want to use. You will sign in securely with Google on the next screen.",
+        "data": {"email": "Gmail address"},
+        "data_description": {"email": "The full Gmail or Google Workspace email address."}
       },
-      "auth": {
-        "title": "Authorise with Google",
-        "description": "Click the link below to grant Home Assistant access to your Gmail via IMAP."
+      "auth": {"title": "Sign in with Google", "description": "Continue to Google to grant Gmail mailbox access. Email HA itself performs only read-only IMAP operations."},
+      "sensors": {
+        "title": "Choose Gmail entities",
+        "description": "Recommended Gmail entities are already selected. You can change this selection later from Configure.",
+        "data": {"gmail_entities": "Gmail entities"},
+        "data_description": {"gmail_entities": "Primary unread, Latest email, and New email are recommended for most homes."}
       },
-      "settings": {
-        "title": "Mailbox settings",
-        "description": "Choose which folder to monitor and how often to poll.",
-        "data": {
-          "folder": "IMAP folder",
-          "scan_interval": "Poll interval (seconds)"
-        }
-      },
-      "reauth_confirm": {
-        "title": "Re-authenticate with Google",
-        "description": "Your Gmail authorisation has expired or been revoked. Click Submit to re-authenticate with Google."
-      }
+      "reauth_confirm": {"title": "Sign in to Gmail again", "description": "Email HA needs renewed permission for this Gmail account."}
     },
     "abort": {
       "already_configured": "This Gmail address is already configured.",
-      "reauth_successful": "Re-authentication was successful.",
-      "missing_credentials": "No application credentials found. Add them under Settings → Devices & Services → ⋮ → Application Credentials.",
-      "oauth_error": "An OAuth2 error occurred. Check that your OAuth2 client ID and secret are correct under Settings → Devices & Services → ⋮ → Application Credentials.",
-      "oauth_unauthorized": "Google rejected the authorisation. Ensure your OAuth2 app has the Gmail IMAP scope and your account is added as a test user.",
-      "oauth_failed": "Could not obtain an OAuth2 token. Try removing and re-adding the application credentials, then set up again."
+      "already_in_progress": "Setup for this Gmail account is already in progress.",
+      "authorize_url_timeout": "Timed out while preparing Google sign-in. Try again.",
+      "missing_configuration": "OAuth application credentials are not configured.",
+      "missing_credentials": "Application credentials are required. Open Settings > Devices & services > Application credentials, add Email HA credentials, then try again.",
+      "no_url_available": "Home Assistant has no URL available for the OAuth callback.",
+      "oauth_error": "Google returned an OAuth error. Check the client ID, client secret, redirect URI, consent screen, and test-user access.",
+      "oauth_failed": "Home Assistant could not obtain an OAuth token from Google.",
+      "oauth_implementation_unavailable": "OAuth configuration is temporarily unavailable. Try again later.",
+      "oauth_timeout": "Google sign-in timed out. Try again.",
+      "oauth_unauthorized": "Google rejected access. Check the OAuth consent screen and add this account as a test user when the app is in testing.",
+      "reauth_successful": "Gmail access was renewed successfully.",
+      "user_rejected_authorize": "Google sign-in was cancelled."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "Gmail IMAP options",
-        "menu_options": {
-          "mailbox": "Mailbox settings",
-          "add_gmail_sensor": "Add Gmail inbox sensors",
-          "add_search_sensor": "Add email search sensor",
-          "remove_search_sensor": "Remove email search sensor"
-        }
+      "init": {"title": "Manage Gmail", "menu_options": {"gmail_sensors": "Gmail sensors", "custom_sensors": "Custom email sensors", "advanced_account_settings": "Advanced account settings"}},
+      "gmail_sensors": {"title": "Gmail sensors", "description": "Choose the Gmail entities you want for this account. Disabled entities remain discoverable and can be enabled here later.", "data": {"gmail_entities": "Enabled Gmail entities"}},
+      "custom_sensors": {"title": "Custom email sensors", "description": "Add, edit, duplicate, or delete a sensor that counts matching email on Gmail's server.", "data": {"manage_action": "Choose an action"}},
+      "custom_sensor_common": {
+        "title": "Custom email sensor",
+        "description": "Only the number of matching emails is retrieved. Matching is performed by Gmail; message contents are not downloaded for this sensor. Only filled filters are used, and all filled conditions must match.",
+        "data": {"name": "Name", "folder": "Folder", "from": "From contains", "subject": "Subject contains", "read_state": "Read state", "gmail_category": "Gmail category", "important_state": "Gmail importance", "starred_state": "Starred state", "more_filters": "Add more filters"},
+        "data_description": {"name": "A clear entity name, such as RSA unread or Bookings.", "folder": "Choose a discovered folder or enter its exact IMAP name.", "from": "Match sender name or address. Example: rsa.ie", "subject": "Match subject text. Example: booking", "more_filters": "Continue to recipient, body-text, any-text, and date filters. Turning this off clears those filters when editing."}
       },
-      "mailbox": {
-        "title": "Mailbox settings",
-        "data": {
-          "folder": "IMAP folder",
-          "scan_interval": "Poll interval (seconds)"
-        }
-      },
-      "add_search_sensor": {
-        "title": "Add email search sensor",
-        "description": "The sensor counts matching UIDs on the server without fetching message bodies. Populated filters combine with AND.",
-        "data": {
-          "name": "Name",
-          "folder": "IMAP folder",
-          "from": "From contains",
-          "to": "To contains",
-          "cc": "CC contains",
-          "subject": "Subject contains",
-          "body": "Body contains",
-          "text": "Any text contains",
-          "read_state": "Read state",
-          "starred_state": "Starred state",
-          "important_state": "Gmail importance",
-          "gmail_category": "Gmail category",
-          "since": "Since date",
-          "before": "Before date",
-          "on": "On date"
-        }
-      },
-      "add_gmail_sensor": {
-        "title": "Add Gmail inbox sensors",
-        "description": "Choose optional sensors for reliable Gmail classifications in INBOX. Categories use Gmail's documented X-GM-RAW IMAP extension; Starred uses the standard IMAP Flagged state. No message bodies are fetched.",
-        "data": {
-          "presets": "Sensors"
-        }
-      },
-      "remove_search_sensor": {
-        "title": "Remove email search sensor",
-        "data": {
-          "sensor_id": "Search sensor"
-        }
-      }
+      "custom_sensor_advanced": {"title": "More custom sensor filters", "description": "These optional conditions are also combined with AND. Body and text matching happen on Gmail's server without downloading message bodies into Home Assistant.", "data": {"to": "To contains", "cc": "CC contains", "body": "Body contains", "text": "Any text contains", "since": "Since", "before": "Before", "on": "On"}},
+      "delete_custom_sensor": {"title": "Delete {name}?", "description": "This removes the custom sensor definition and its entity after the integration reloads.", "data": {"confirm": "Delete this custom sensor"}},
+      "advanced_account_settings": {"title": "Advanced account settings", "description": "Gmail IMAP IDLE provides normal near-real-time updates; an internal 15-minute refresh is used only for resilience. The folder below affects Latest email and New email. Gmail count sensors always use Inbox.", "data": {"monitored_folder": "Latest email and New email folder"}, "data_description": {"monitored_folder": "Choose a discovered folder or enter an exact IMAP folder name. Inbox is recommended."}}
     },
-    "error": {
-      "invalid_search_filters": "One or more search filters are invalid. Remove control characters and use valid dates.",
-      "gmail_sensors_already_configured": "All selected Gmail inbox sensors are already configured."
-    },
-    "abort": {
-      "too_many_search_sensors": "The maximum of 20 email search sensors has been reached."
-    }
+    "error": {"invalid_custom_sensor": "Check the name, folder, filters, and dates. Control characters are not allowed.", "invalid_folder": "Choose a non-empty folder without control characters."},
+    "abort": {"too_many_custom_sensors": "The maximum of 20 custom email sensors has been reached.", "custom_sensor_not_found": "That custom email sensor no longer exists.", "invalid_custom_sensor": "The custom email sensor contains invalid filters."}
+  },
+  "selector": {
+    "gmail_entities": {"options": {"primary_unread": "Primary unread", "latest_email": "Latest email", "new_email": "New email event", "inbox_unread": "Inbox unread", "important_unread": "Important unread", "starred_unread": "Starred unread", "updates_unread": "Updates unread", "promotions_unread": "Promotions unread", "social_unread": "Social unread", "forums_unread": "Forums unread", "inbox_messages": "Inbox messages", "mailbox_folders": "Mailbox folders"}},
+    "read_state": {"options": {"any": "Any", "unread": "Unread", "read": "Read"}},
+    "starred_state": {"options": {"any": "Any", "starred": "Starred", "not_starred": "Not starred"}},
+    "important_state": {"options": {"any": "Any", "important": "Important", "not_important": "Not important"}},
+    "gmail_category": {"options": {"any": "Any", "primary": "Primary", "updates": "Updates", "promotions": "Promotions", "social": "Social", "forums": "Forums"}}
   },
   "entity": {
-    "event": {
-      "new_email": {
-        "name": "New email"
-      }
-    },
-    "sensor": {
-      "unread_count": {
-        "name": "Unread count"
-      },
-      "last_email": {
-        "name": "Last email"
-      }
-    }
+    "event": {"new_email": {"name": "New email"}},
+    "sensor": {"primary_unread": {"name": "Primary unread"}, "inbox_unread": {"name": "Inbox unread"}, "important_unread": {"name": "Important unread"}, "starred_unread": {"name": "Starred unread"}, "updates_unread": {"name": "Updates unread"}, "promotions_unread": {"name": "Promotions unread"}, "social_unread": {"name": "Social unread"}, "forums_unread": {"name": "Forums unread"}, "inbox_messages": {"name": "Inbox messages"}, "mailbox_folders": {"name": "Mailbox folders"}, "latest_email": {"name": "Latest email"}}
   },
   "services": {
-    "query_emails": {
-      "name": "Query emails (legacy)",
-      "description": "Backwards-compatible IMAP search action. New automations should use Find emails."
-    },
-    "search_emails": {
-      "name": "Search emails (advanced IMAP)",
-      "description": "Search using raw standard IMAP SEARCH criteria. For ordinary automations, use Find emails."
-    },
-    "find_emails": {
-      "name": "Find emails",
-      "description": "Find messages with UI-friendly filters that combine using AND."
-    },
-    "get_message": {
-      "name": "Get message",
-      "description": "Retrieve bounded readable content for a folder-specific message UID."
-    }
+    "find_emails": {"name": "Find emails", "description": "Find emails with friendly filters. Blank filters are ignored and filled filters combine with AND."},
+    "search_emails": {"name": "Advanced: Search using IMAP query", "description": "Run a raw IMAP SEARCH query. Most users should use Find emails."},
+    "get_email_contents": {"name": "Get email contents", "description": "Retrieve bounded readable content using a UID from Find emails or the New email event."}
   }
 }

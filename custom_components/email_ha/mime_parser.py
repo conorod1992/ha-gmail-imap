@@ -234,12 +234,8 @@ def parse_email_bytes(
         "preview": re.sub(r"\s+", " ", body)[:PREVIEW_CHARS],
         "has_attachments": bool(attachments),
         "attachments": attachments,
-        # Compatibility keys used by the existing sensors and query action.
-        "sender_name": senders[0]["name"] if senders else "",
-        "sender_email": senders[0]["address"] if senders else "",
     }
     if include_body:
         result["plain_text_body"] = body[:body_max_chars]
-        result["body_text"] = body[:body_max_chars]
         result["body_truncated"] = truncated
     return result

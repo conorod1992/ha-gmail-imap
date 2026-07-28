@@ -1,4 +1,4 @@
-"""Email HA integration for read-only Gmail IMAP access."""
+"""Read-only Gmail access for Home Assistant."""
 
 from __future__ import annotations
 
@@ -25,13 +25,11 @@ from homeassistant.helpers.config_entry_oauth2_flow import (
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
+    CONF_CUSTOM_SENSORS,
     CONF_EMAIL,
-    CONF_FOLDER,
-    CONF_SCAN_INTERVAL,
-    CONF_SEARCH_SENSORS,
+    CONF_MONITORED_FOLDER,
     DEFAULT_FOLDER,
     DEFAULT_MESSAGE_BODY_CHARS,
-    DEFAULT_SCAN_INTERVAL,
     DEFAULT_SEARCH_BODY_CHARS,
     DEFAULT_SEARCH_RESULTS,
     DOMAIN,
@@ -41,16 +39,14 @@ from .const import (
     MAX_SEARCH_RESULTS,
     PLATFORMS,
     SERVICE_ATTR_FOLDER,
-    SERVICE_ATTR_INCLUDE_ATTACHMENTS,
-    SERVICE_ATTR_INCLUDE_FULL_BODY,
     SERVICE_ATTR_MAX_RESULTS,
     SERVICE_ATTR_SEARCH_CRITERIA,
     SERVICE_FIND_EMAILS,
-    SERVICE_GET_MESSAGE,
-    SERVICE_QUERY_EMAILS,
+    SERVICE_GET_EMAIL_CONTENTS,
     SERVICE_SEARCH_EMAILS,
 )
 from .coordinator import EmailDataUpdateCoordinator
+from .gmail import enabled_entities_for_entry
 from .imap_client import (
     ImapAuthError,
     ImapClient,
@@ -67,27 +63,18 @@ from .search import (
     STARRED_STATES,
     build_structured_search_tokens,
     normalize_structured_filters,
+    validate_imap_folder,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 _ACCOUNT_FIELD = {vol.Optional("config_entry_id"): cv.string}
-QUERY_EMAILS_SCHEMA = vol.Schema(
-    {
-        **_ACCOUNT_FIELD,
-        vol.Optional(SERVICE_ATTR_FOLDER, default=DEFAULT_FOLDER): cv.string,
-        vol.Optional(SERVICE_ATTR_SEARCH_CRITERIA, default="ALL"): cv.string,
-        vol.Optional(SERVICE_ATTR_MAX_RESULTS, default=DEFAULT_SEARCH_RESULTS): vol.All(
-            vol.Coerce(int), vol.Range(min=1, max=MAX_SEARCH_RESULTS)
-        ),
-        vol.Optional(SERVICE_ATTR_INCLUDE_FULL_BODY, default=False): cv.boolean,
-        vol.Optional(SERVICE_ATTR_INCLUDE_ATTACHMENTS, default=False): cv.boolean,
-    }
-)
 SEARCH_EMAILS_SCHEMA = vol.Schema(
     {
         **_ACCOUNT_FIELD,
-        vol.Optional(SERVICE_ATTR_FOLDER, default=DEFAULT_FOLDER): cv.string,
+        vol.Optional(SERVICE_ATTR_FOLDER, default=DEFAULT_FOLDER): vol.All(
+            cv.string, validate_imap_folder
+        ),
         vol.Optional(SERVICE_ATTR_SEARCH_CRITERIA, default="ALL"): cv.string,
         vol.Optional(SERVICE_ATTR_MAX_RESULTS, default=DEFAULT_SEARCH_RESULTS): vol.All(
             vol.Coerce(int), vol.Range(min=1, max=MAX_SEARCH_RESULTS)
@@ -101,7 +88,9 @@ SEARCH_EMAILS_SCHEMA = vol.Schema(
 FIND_EMAILS_SCHEMA = vol.Schema(
     {
         **_ACCOUNT_FIELD,
-        vol.Optional(SERVICE_ATTR_FOLDER, default=DEFAULT_FOLDER): cv.string,
+        vol.Optional(SERVICE_ATTR_FOLDER, default=DEFAULT_FOLDER): vol.All(
+            cv.string, validate_imap_folder
+        ),
         vol.Optional("from"): cv.string,
         vol.Optional("to"): cv.string,
         vol.Optional("cc"): cv.string,
@@ -126,10 +115,12 @@ FIND_EMAILS_SCHEMA = vol.Schema(
         ),
     }
 )
-GET_MESSAGE_SCHEMA = vol.Schema(
+GET_EMAIL_CONTENTS_SCHEMA = vol.Schema(
     {
         **_ACCOUNT_FIELD,
-        vol.Optional(SERVICE_ATTR_FOLDER, default=DEFAULT_FOLDER): cv.string,
+        vol.Optional(SERVICE_ATTR_FOLDER, default=DEFAULT_FOLDER): vol.All(
+            cv.string, validate_imap_folder
+        ),
         vol.Required("uid"): vol.All(cv.string, vol.Match(r"^[0-9]+$")),
         vol.Optional("body_max_chars", default=DEFAULT_MESSAGE_BODY_CHARS): vol.All(
             vol.Coerce(int), vol.Range(min=1, max=MAX_BODY_CHARS)
@@ -139,37 +130,36 @@ GET_MESSAGE_SCHEMA = vol.Schema(
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Register actions independently of config-entry load state."""
+    """Register the three read-only response actions."""
     _register_services(hass)
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up Email HA from a config entry."""
+    """Set up one Gmail account."""
     try:
         implementation = await async_get_config_entry_implementation(hass, entry)
     except ImplementationUnavailableError as err:
         raise ConfigEntryNotReady(
             "OAuth2 implementation temporarily unavailable; will retry"
         ) from err
-    oauth_session = OAuth2Session(hass, entry, implementation)
-    settings = {**entry.data, **entry.options}
     coordinator = EmailDataUpdateCoordinator(
         hass=hass,
-        oauth_session=oauth_session,
+        config_entry=entry,
+        oauth_session=OAuth2Session(hass, entry, implementation),
         email_address=entry.data[CONF_EMAIL],
         imap_host=GMAIL_IMAP_HOST,
         imap_port=GMAIL_IMAP_PORT,
-        folder=settings.get(CONF_FOLDER, DEFAULT_FOLDER),
-        scan_interval=settings.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
-        search_sensors=settings.get(CONF_SEARCH_SENSORS, []),
+        folder=entry.options.get(CONF_MONITORED_FOLDER, DEFAULT_FOLDER),
+        enabled_gmail_entities=enabled_entities_for_entry(entry),
+        custom_sensors=entry.options.get(CONF_CUSTOM_SENSORS, []),
     )
     try:
         await coordinator.async_config_entry_first_refresh()
     except ConfigEntryAuthFailed:
         raise
     except Exception as err:
-        raise ConfigEntryNotReady("Initial email fetch failed; will retry") from err
+        raise ConfigEntryNotReady("Initial Gmail fetch failed; will retry") from err
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(
@@ -182,7 +172,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry while leaving action schemas registered."""
+    """Unload entities and release the account coordinator."""
     unloaded = await hass.config_entries.async_unload_platforms(
         entry, [Platform(platform) for platform in PLATFORMS]
     )
@@ -192,7 +182,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload so mailbox and dynamically configured entities stay in sync."""
+    """Reload after entity, custom-sensor, or folder management changes."""
     await hass.config_entries.async_reload(entry.entry_id)
 
 
@@ -207,7 +197,7 @@ def _coordinator_for_call(
         if not configured:
             raise ServiceValidationError("No loaded Email HA account is available")
         raise ServiceValidationError(
-            "Multiple email accounts are configured; select an account"
+            "Multiple Gmail accounts are configured; select an account"
         )
     entry = hass.config_entries.async_get_entry(entry_id)
     if entry is None or entry.domain != DOMAIN:
@@ -220,22 +210,23 @@ def _coordinator_for_call(
 
 
 def _entry_for_coordinator(coordinator: EmailDataUpdateCoordinator) -> ConfigEntry:
-    """Return the coordinator's loaded config entry."""
     if coordinator.config_entry is None:
         raise HomeAssistantError("The selected Email HA account is not loaded")
     return coordinator.config_entry
 
 
-async def _connect_for_call(
-    coordinator: EmailDataUpdateCoordinator,
-) -> ImapClient:
+async def _connect_for_call(coordinator: EmailDataUpdateCoordinator) -> ImapClient:
+    """Open one short-lived read-only connection for an explicit action."""
     try:
         await coordinator.oauth_session.async_ensure_token_valid()
         token: dict[str, Any] = coordinator.oauth_session.token
-        access_token = str(token["access_token"])
+        access_token = token["access_token"]
+        if isinstance(access_token, bytes):
+            access_token = access_token.decode()
         client = ImapClient(GMAIL_IMAP_HOST, GMAIL_IMAP_PORT)
         await client.connect(
-            _entry_for_coordinator(coordinator).data[CONF_EMAIL], access_token
+            _entry_for_coordinator(coordinator).data[CONF_EMAIL],
+            str(access_token),
         )
     except ImapAuthError as err:
         raise HomeAssistantError(
@@ -254,15 +245,15 @@ def _translate_imap_error(err: ImapClientError) -> HomeAssistantError:
     if isinstance(err, ImapFolderError):
         return HomeAssistantError("The selected IMAP folder is not accessible")
     if isinstance(err, ImapSearchError):
-        return HomeAssistantError("The IMAP server rejected the search criteria")
+        return HomeAssistantError("Gmail rejected the IMAP search criteria")
     if isinstance(err, ImapMessageNotFoundError):
         return HomeAssistantError(
-            "No message with that UID exists in the selected folder"
+            "No email with that UID exists in the selected folder"
         )
     return HomeAssistantError("The Gmail IMAP operation failed")
 
 
-async def _search(
+async def _search_raw(
     coordinator: EmailDataUpdateCoordinator,
     *,
     folder: str,
@@ -282,14 +273,14 @@ async def _search(
                 folder,
                 criteria,
                 max_results,
-                include_full_body=include_body,
+                include_body=include_body,
                 body_max_chars=body_max_chars,
             )
     except ImapClientError as err:
         raise _translate_imap_error(err) from err
 
 
-async def _search_tokens(
+async def _search_structured(
     coordinator: EmailDataUpdateCoordinator,
     *,
     folder: str,
@@ -298,7 +289,6 @@ async def _search_tokens(
     include_body: bool,
     body_max_chars: int,
 ) -> list[dict[str, Any]]:
-    """Run one validated structured search without string round-tripping."""
     client = await _connect_for_call(coordinator)
     try:
         async with client:
@@ -314,42 +304,9 @@ async def _search_tokens(
 
 
 def _register_services(hass: HomeAssistant) -> None:
-    """Register the read-only action surface once."""
-    if hass.services.has_service(DOMAIN, SERVICE_QUERY_EMAILS):
+    """Register one normal search, one advanced search, and explicit retrieval."""
+    if hass.services.has_service(DOMAIN, SERVICE_FIND_EMAILS):
         return
-
-    async def handle_query_emails(call: ServiceCall) -> dict[str, Any]:
-        coordinator = _coordinator_for_call(hass, call)
-        emails = await _search(
-            coordinator,
-            folder=call.data[SERVICE_ATTR_FOLDER],
-            criteria=call.data[SERVICE_ATTR_SEARCH_CRITERIA],
-            max_results=call.data[SERVICE_ATTR_MAX_RESULTS],
-            include_body=call.data[SERVICE_ATTR_INCLUDE_FULL_BODY],
-            body_max_chars=DEFAULT_MESSAGE_BODY_CHARS,
-        )
-        return {"emails": emails}
-
-    async def handle_search_emails(call: ServiceCall) -> dict[str, Any]:
-        coordinator = _coordinator_for_call(hass, call)
-        folder = call.data[SERVICE_ATTR_FOLDER]
-        criteria = call.data[SERVICE_ATTR_SEARCH_CRITERIA]
-        emails = await _search(
-            coordinator,
-            folder=folder,
-            criteria=criteria,
-            max_results=call.data[SERVICE_ATTR_MAX_RESULTS],
-            include_body=call.data["include_body"],
-            body_max_chars=call.data["body_max_chars"],
-        )
-        return {
-            "account": _entry_for_coordinator(coordinator).data[CONF_EMAIL],
-            "folder": folder,
-            "search_criteria": criteria,
-            "count": len(emails),
-            "emails": emails,
-            "truncated": len(emails) == call.data[SERVICE_ATTR_MAX_RESULTS],
-        }
 
     async def handle_find_emails(call: ServiceCall) -> dict[str, Any]:
         coordinator = _coordinator_for_call(hass, call)
@@ -359,7 +316,7 @@ def _register_services(hass: HomeAssistant) -> None:
             tokens = build_structured_search_tokens(filters)
         except ValueError as err:
             raise ServiceValidationError(str(err)) from err
-        emails = await _search_tokens(
+        emails = await _search_structured(
             coordinator,
             folder=folder,
             tokens=tokens,
@@ -376,13 +333,34 @@ def _register_services(hass: HomeAssistant) -> None:
             "truncated": len(emails) == call.data[SERVICE_ATTR_MAX_RESULTS],
         }
 
-    async def handle_get_message(call: ServiceCall) -> dict[str, Any]:
+    async def handle_search_emails(call: ServiceCall) -> dict[str, Any]:
+        coordinator = _coordinator_for_call(hass, call)
+        folder = call.data[SERVICE_ATTR_FOLDER]
+        criteria = call.data[SERVICE_ATTR_SEARCH_CRITERIA]
+        emails = await _search_raw(
+            coordinator,
+            folder=folder,
+            criteria=criteria,
+            max_results=call.data[SERVICE_ATTR_MAX_RESULTS],
+            include_body=call.data["include_body"],
+            body_max_chars=call.data["body_max_chars"],
+        )
+        return {
+            "account": _entry_for_coordinator(coordinator).data[CONF_EMAIL],
+            "folder": folder,
+            "search_criteria": criteria,
+            "count": len(emails),
+            "emails": emails,
+            "truncated": len(emails) == call.data[SERVICE_ATTR_MAX_RESULTS],
+        }
+
+    async def handle_get_email_contents(call: ServiceCall) -> dict[str, Any]:
         coordinator = _coordinator_for_call(hass, call)
         folder = call.data[SERVICE_ATTR_FOLDER]
         client = await _connect_for_call(coordinator)
         try:
             async with client:
-                message = await client.get_message(
+                message = await client.get_email_contents(
                     folder,
                     call.data["uid"],
                     body_max_chars=call.data["body_max_chars"],
@@ -397,9 +375,9 @@ def _register_services(hass: HomeAssistant) -> None:
 
     hass.services.async_register(
         DOMAIN,
-        SERVICE_QUERY_EMAILS,
-        handle_query_emails,
-        schema=QUERY_EMAILS_SCHEMA,
+        SERVICE_FIND_EMAILS,
+        handle_find_emails,
+        schema=FIND_EMAILS_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )
     hass.services.async_register(
@@ -411,15 +389,8 @@ def _register_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(
         DOMAIN,
-        SERVICE_FIND_EMAILS,
-        handle_find_emails,
-        schema=FIND_EMAILS_SCHEMA,
-        supports_response=SupportsResponse.ONLY,
-    )
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_GET_MESSAGE,
-        handle_get_message,
-        schema=GET_MESSAGE_SCHEMA,
+        SERVICE_GET_EMAIL_CONTENTS,
+        handle_get_email_contents,
+        schema=GET_EMAIL_CONTENTS_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )

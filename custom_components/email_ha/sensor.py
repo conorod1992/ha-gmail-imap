@@ -1,31 +1,36 @@
-"""Sensor platform for Email IMAP."""
+"""Gmail-facing and custom count sensors for Email HA."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
+from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     ATTR_DATE,
     ATTR_FOLDER,
-    ATTR_SENDER_EMAIL,
+    ATTR_SENDER_ADDRESS,
     ATTR_SENDER_NAME,
-    ATTR_SUBJECT,
     ATTR_UID,
-    CONF_EMAIL,
+    CONF_CUSTOM_SENSORS,
     CONF_FOLDER,
-    CONF_SEARCH_SENSORS,
+    DEFAULT_FOLDER,
     DOMAIN,
     UNAVAILABLE_AFTER_SECONDS,
 )
 from .coordinator import EmailData, EmailDataUpdateCoordinator
+from .entity import gmail_device_info
+from .gmail import (
+    GMAIL_SENSOR_DEFINITIONS,
+    GmailEntityDefinition,
+    enabled_entities_for_entry,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,38 +40,21 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Email IMAP sensors for a config entry."""
+    """Create all fixed entities plus configured custom sensors."""
     coordinator: EmailDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     entities: list[SensorEntity] = [
-        UnreadCountSensor(coordinator, entry),
-        TotalCountSensor(coordinator, entry),
-        FoldersSensor(coordinator, entry),
-        LastEmailSensor(coordinator, entry),
+        GmailSensor(coordinator, entry, definition)
+        for definition in GMAIL_SENSOR_DEFINITIONS
     ]
     entities.extend(
-        SearchCountSensor(coordinator, entry, monitor)
-        for monitor in entry.options.get(CONF_SEARCH_SENSORS, [])
+        CustomEmailCountSensor(coordinator, entry, sensor)
+        for sensor in entry.options.get(CONF_CUSTOM_SENSORS, [])
     )
     async_add_entities(entities)
 
 
-def _device_info(entry: ConfigEntry) -> DeviceInfo:
-    return DeviceInfo(
-        identifiers={(DOMAIN, entry.entry_id)},
-        name=f"Gmail – {entry.data[CONF_EMAIL].split('@')[0]}",
-        manufacturer="Google",
-        model="Gmail IMAP (OAuth2)",
-        entry_type=DeviceEntryType.SERVICE,
-    )
-
-
-def _entry_folder(entry: ConfigEntry) -> str:
-    """Return the effective configured folder, including options."""
-    return entry.options.get(CONF_FOLDER, entry.data.get(CONF_FOLDER, "INBOX"))
-
-
 class _BaseEmailSensor(CoordinatorEntity[EmailDataUpdateCoordinator], SensorEntity):
-    """Base class for Email IMAP sensors."""
+    """Base class shared by fixed and custom sensors."""
 
     _attr_has_entity_name = True
 
@@ -79,26 +67,21 @@ class _BaseEmailSensor(CoordinatorEntity[EmailDataUpdateCoordinator], SensorEnti
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{unique_suffix}"
-        self._attr_device_info = _device_info(entry)
+        self._attr_device_info = gmail_device_info(entry)
 
     @property
     def available(self) -> bool:
-        if self.coordinator.data is None:
-            _LOGGER.debug("%s unavailable: no data yet", self.entity_id)
+        """Remain available only while the shared account data is fresh."""
+        if self.coordinator.data is None or self.coordinator.last_success_time is None:
             return False
-        last_success = self.coordinator.last_success_time
-        if last_success is None:
-            _LOGGER.debug("%s unavailable: last_success_time not set", self.entity_id)
-            return False
-        elapsed = (datetime.now(timezone.utc) - last_success).total_seconds()
+        elapsed = (
+            datetime.now(timezone.utc) - self.coordinator.last_success_time
+        ).total_seconds()
         if elapsed > UNAVAILABLE_AFTER_SECONDS:
             _LOGGER.warning(
-                "%s unavailable: no successful update for %.0fs (threshold %ds); "
-                "coordinator last_update_success=%s",
+                "%s unavailable: no successful update for %.0f seconds",
                 self.entity_id,
                 elapsed,
-                UNAVAILABLE_AFTER_SECONDS,
-                self.coordinator.last_update_success,
             )
             return False
         return True
@@ -108,123 +91,75 @@ class _BaseEmailSensor(CoordinatorEntity[EmailDataUpdateCoordinator], SensorEnti
         return self.coordinator.data
 
 
-class UnreadCountSensor(_BaseEmailSensor):
-    """Number of unread messages in the monitored folder."""
+class GmailSensor(_BaseEmailSensor):
+    """One fixed, translated Gmail concept."""
 
-    _attr_name = "Unread count"
-    _attr_icon = "mdi:email-outline"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "messages"
     _attr_suggested_display_precision = 0
 
     def __init__(
-        self, coordinator: EmailDataUpdateCoordinator, entry: ConfigEntry
+        self,
+        coordinator: EmailDataUpdateCoordinator,
+        entry: ConfigEntry,
+        definition: GmailEntityDefinition,
     ) -> None:
-        super().__init__(coordinator, entry, "unread_count")
+        self._definition = definition
+        self._attr_translation_key = definition.key
+        self._attr_icon = definition.icon
+        self._attr_entity_registry_enabled_default = (
+            definition.key in enabled_entities_for_entry(entry)
+        )
+        if definition.source == "latest_email":
+            self._attr_state_class = None
+            self._attr_native_unit_of_measurement = None
+            self._attr_suggested_display_precision = None
+        elif definition.source == "folder_count":
+            self._attr_native_unit_of_measurement = "folders"
+        super().__init__(coordinator, entry, definition.key)
 
     @property
-    def native_value(self) -> int | None:
+    def native_value(self) -> int | str | None:
+        """Return state from the source named by the canonical definition."""
         data = self._email_data
-        return data.unread_count if data else None
+        if data is None:
+            return None
+        if self._definition.source == "inbox_unread":
+            return data.inbox_unread
+        if self._definition.source == "inbox_total":
+            return data.inbox_total
+        if self._definition.source == "folder_count":
+            return len(data.folders)
+        if self._definition.source == "latest_email":
+            if data.latest_email:
+                return data.latest_email.get("subject") or "(no subject)"
+            return None
+        result = data.gmail_counts.get(self._definition.key)
+        return result.count if result else None
 
     @property
-    def extra_state_attributes(self) -> dict:
-        return {ATTR_FOLDER: _entry_folder(self._entry)}
-
-
-class TotalCountSensor(_BaseEmailSensor):
-    """Total number of messages in the monitored folder."""
-
-    _attr_name = "Total count"
-    _attr_icon = "mdi:email-multiple-outline"
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = "messages"
-    _attr_suggested_display_precision = 0
-
-    def __init__(
-        self, coordinator: EmailDataUpdateCoordinator, entry: ConfigEntry
-    ) -> None:
-        super().__init__(coordinator, entry, "total_count")
-
-    @property
-    def native_value(self) -> int | None:
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose useful metadata without filter values or message bodies."""
         data = self._email_data
-        return data.total_count if data else None
-
-    @property
-    def extra_state_attributes(self) -> dict:
-        return {ATTR_FOLDER: _entry_folder(self._entry)}
-
-
-class FoldersSensor(_BaseEmailSensor):
-    """Number of mailbox folders on the account, with folder list as attribute."""
-
-    _attr_name = "Folders"
-    _attr_icon = "mdi:folder-multiple-outline"
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = "folders"
-    _attr_suggested_display_precision = 0
-
-    def __init__(
-        self, coordinator: EmailDataUpdateCoordinator, entry: ConfigEntry
-    ) -> None:
-        super().__init__(coordinator, entry, "folders")
-
-    @property
-    def native_value(self) -> int | None:
-        data = self._email_data
-        return len(data.folders) if data else None
-
-    @property
-    def extra_state_attributes(self) -> dict:
-        data = self._email_data
-        return {"folders": data.folders if data else []}
-
-
-class LastEmailSensor(_BaseEmailSensor):
-    """Subject line of the most-recently received email."""
-
-    _attr_name = "Last email"
-    _attr_icon = "mdi:email"
-
-    def __init__(
-        self, coordinator: EmailDataUpdateCoordinator, entry: ConfigEntry
-    ) -> None:
-        super().__init__(coordinator, entry, "last_email")
-
-    @property
-    def native_value(self) -> str | None:
-        data = self._email_data
-        if data and data.latest_email:
-            return data.latest_email.get(ATTR_SUBJECT) or "(no subject)"
-        return None
-
-    @property
-    def extra_state_attributes(self) -> dict:
-        data = self._email_data
-        if not data or not data.latest_email:
-            return {}
-        email = data.latest_email
-        recent = [
-            {
-                ATTR_SUBJECT: e.get(ATTR_SUBJECT),
-                ATTR_SENDER_NAME: e.get(ATTR_SENDER_NAME),
-                ATTR_SENDER_EMAIL: e.get(ATTR_SENDER_EMAIL),
+        if self._definition.source == "folder_count":
+            return {"folders": data.folders if data else []}
+        if self._definition.source == "latest_email":
+            if not data or not data.latest_email:
+                return {}
+            message = data.latest_email
+            sender = message.get("sender") or {}
+            return {
+                ATTR_SENDER_NAME: sender.get("name", ""),
+                ATTR_SENDER_ADDRESS: sender.get("address", ""),
+                ATTR_DATE: message.get("date"),
+                ATTR_UID: message.get("uid"),
+                ATTR_FOLDER: self.coordinator.folder,
             }
-            for e in data.emails[:3]
-        ]
-        return {
-            ATTR_SENDER_NAME: email.get(ATTR_SENDER_NAME),
-            ATTR_SENDER_EMAIL: email.get(ATTR_SENDER_EMAIL),
-            ATTR_DATE: email.get(ATTR_DATE),
-            ATTR_UID: email.get(ATTR_UID),
-            ATTR_FOLDER: _entry_folder(self._entry),
-            "recent_emails": recent,
-        }
+        return {ATTR_FOLDER: DEFAULT_FOLDER}
 
 
-class SearchCountSensor(_BaseEmailSensor):
-    """Count of messages matching one optional structured search."""
+class CustomEmailCountSensor(_BaseEmailSensor):
+    """Count emails matching one user-managed server-side filter."""
 
     _attr_icon = "mdi:email-search-outline"
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -235,27 +170,26 @@ class SearchCountSensor(_BaseEmailSensor):
         self,
         coordinator: EmailDataUpdateCoordinator,
         entry: ConfigEntry,
-        monitor: dict,
+        sensor: dict[str, Any],
     ) -> None:
-        self._monitor = monitor
-        self._monitor_id = str(monitor["id"])
-        self._attr_name = str(monitor["name"])
-        super().__init__(coordinator, entry, f"search_{self._monitor_id}")
+        self._sensor = sensor
+        self._sensor_id = str(sensor["id"])
+        self._attr_name = str(sensor["name"])
+        super().__init__(coordinator, entry, f"custom_{self._sensor_id}")
 
     @property
     def native_value(self) -> int | None:
         data = self._email_data
-        if not data or not (result := data.search_counts.get(self._monitor_id)):
-            return None
-        return result.count
+        result = data.custom_counts.get(self._sensor_id) if data else None
+        return result.count if result else None
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         data = self._email_data
-        result = data.search_counts.get(self._monitor_id) if data else None
-        filters = self._monitor.get("filters", {})
+        result = data.custom_counts.get(self._sensor_id) if data else None
+        filters = self._sensor.get("filters", {})
         return {
-            ATTR_FOLDER: self._monitor.get(CONF_FOLDER, "INBOX"),
+            ATTR_FOLDER: self._sensor.get(CONF_FOLDER, DEFAULT_FOLDER),
             "filter_types": sorted(filters),
             "newest_matching_uid": result.newest_uid if result else None,
         }

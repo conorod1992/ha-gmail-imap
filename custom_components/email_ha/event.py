@@ -1,14 +1,18 @@
-"""Discoverable new-email event entity for Email HA."""
+"""Discoverable New email EventEntity."""
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.components.event import EventEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import Event, HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_EMAIL, DOMAIN, EVENT_NEW_EMAIL, EVENT_TYPE_NEW_EMAIL
+from .const import DOMAIN, EVENT_TYPE_NEW_EMAIL
+from .coordinator import EmailDataUpdateCoordinator
+from .entity import gmail_device_info
+from .gmail import GMAIL_ENTITIES, enabled_entities_for_entry
 
 
 async def async_setup_entry(
@@ -16,40 +20,38 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the new-email event entity for one Gmail account."""
-    async_add_entities([NewEmailEventEntity(entry)])
+    """Set up one account-scoped new-email event entity."""
+    coordinator: EmailDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    async_add_entities([NewEmailEventEntity(coordinator, entry)])
 
 
 class NewEmailEventEntity(EventEntity):
-    """Expose new mail as a first-class Home Assistant event entity."""
+    """Expose coordinator notifications as the sole public automation event."""
 
     _attr_event_types = [EVENT_TYPE_NEW_EMAIL]
     _attr_has_entity_name = True
-    _attr_icon = "mdi:email-fast-outline"
     _attr_translation_key = "new_email"
 
-    def __init__(self, entry: ConfigEntry) -> None:
-        self._entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_new_email_event"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=f"Gmail – {entry.data[CONF_EMAIL].split('@')[0]}",
-            manufacturer="Google",
-            model="Gmail IMAP (OAuth2)",
-            entry_type=DeviceEntryType.SERVICE,
+    def __init__(
+        self, coordinator: EmailDataUpdateCoordinator, entry: ConfigEntry
+    ) -> None:
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{entry.entry_id}_new_email"
+        self._attr_icon = GMAIL_ENTITIES["new_email"].icon
+        self._attr_device_info = gmail_device_info(entry)
+        self._attr_entity_registry_enabled_default = (
+            "new_email" in enabled_entities_for_entry(entry)
         )
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe after the entity is ready to write state."""
+        """Subscribe directly to this account's coordinator."""
         await super().async_added_to_hass()
         self.async_on_remove(
-            self.hass.bus.async_listen(EVENT_NEW_EMAIL, self._handle_new_email)
+            self._coordinator.async_add_new_email_listener(self._handle_new_email)
         )
 
     @callback
-    def _handle_new_email(self, event: Event) -> None:
-        """Forward this account's legacy bus event through the event entity."""
-        if event.data.get("config_entry_id") != self._entry.entry_id:
-            return
-        self._trigger_event(EVENT_TYPE_NEW_EMAIL, dict(event.data))
+    def _handle_new_email(self, event_data: dict[str, Any]) -> None:
+        """Publish one already bounded, body-free event payload."""
+        self._trigger_event(EVENT_TYPE_NEW_EMAIL, event_data)
         self.async_write_ha_state()

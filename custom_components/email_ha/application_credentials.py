@@ -12,3 +12,14 @@ async def async_get_authorization_server(hass: HomeAssistant) -> AuthorizationSe
         authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
         token_url="https://oauth2.googleapis.com/token",
     )
+
+
+async def async_get_description_placeholders(
+    hass: HomeAssistant,
+) -> dict[str, str]:
+    """Link the credentials dialog to exact setup prerequisites."""
+    return {
+        "documentation_url": "https://github.com/conorod1992/ha-gmail-imap#google-sign-in-setup",
+        "consent_url": "https://console.cloud.google.com/auth/overview",
+        "credentials_url": "https://console.cloud.google.com/apis/credentials",
+    }
