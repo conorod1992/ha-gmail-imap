@@ -3,6 +3,7 @@ find_emails:
   description: >
     Find emails with friendly filters. Blank filters are ignored and all filled
     conditions must match. Gmail performs the search on its server.
+  target: {}
   fields:
     config_entry_id:
       name: Account
@@ -126,7 +127,7 @@ find_emails:
           selector:
             date: {}
         "on":
-          name: On
+          name: "On"
           description: Match emails on this date.
           selector:
             date: {}
@@ -163,6 +164,7 @@ search_emails:
   description: >
     Search using raw IMAP SEARCH criteria. This is for advanced users; most
     automations should use Find emails.
+  target: {}
   fields:
     config_entry_id:
       name: Account
@@ -215,6 +217,7 @@ get_email_contents:
   description: >
     Retrieve bounded readable content for one email. Use the email UID returned
     by Find emails or the New email event.
+  target: {}
   fields:
     config_entry_id:
       name: Account

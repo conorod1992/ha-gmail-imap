@@ -68,6 +68,8 @@ from .search import (
 
 _LOGGER = logging.getLogger(__name__)
 
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
 _ACCOUNT_FIELD = {vol.Optional("config_entry_id"): cv.string}
 SEARCH_EMAILS_SCHEMA = vol.Schema(
     {

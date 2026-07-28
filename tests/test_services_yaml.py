@@ -26,11 +26,13 @@ def _flatten_fields(fields: dict) -> dict:
 
 def test_only_three_actions_are_documented() -> None:
     """Removed action aliases do not remain discoverable."""
-    assert set(_services()) == {
+    services = _services()
+    assert set(services) == {
         "find_emails",
         "search_emails",
         "get_email_contents",
     }
+    assert all(action["target"] == {} for action in services.values())
 
 
 def test_find_email_fields_have_descriptions_and_safe_selectors() -> None:
