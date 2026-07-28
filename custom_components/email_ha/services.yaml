@@ -1,154 +1,39 @@
-query_emails:
-  name: Query emails (legacy)
-  description: >
-    Backwards-compatible IMAP search action. New automations should use
-    find_emails. Attachment content is never returned.
-  fields:
-    config_entry_id:
-      name: Account
-      description: Required when more than one Gmail account is configured.
-      required: false
-      selector:
-        config_entry:
-          integration: email_ha
-    folder:
-      name: Folder
-      description: IMAP folder to search. UIDs are only valid in this folder.
-      default: INBOX
-      selector:
-        text: {}
-    search_criteria:
-      name: IMAP search criteria
-      description: >
-        Standard IMAP criteria, not Gmail web search syntax. Examples: ALL,
-        UNSEEN, FROM "person@example.com", SUBJECT "renewal".
-      default: ALL
-      selector:
-        text: {}
-    max_results:
-      name: Maximum results
-      description: Maximum number of newest matching messages to return (1-25).
-      default: 10
-      selector:
-        number:
-          min: 1
-          max: 25
-          mode: box
-    include_full_body:
-      name: Include body
-      description: Include bounded readable plain text. May expose private content.
-      default: false
-      selector:
-        boolean: {}
-    include_attachments:
-      name: Include attachment metadata
-      description: >
-        Compatibility field. Attachment bytes are never returned; metadata is
-        available when the message body is parsed.
-      default: false
-      selector:
-        boolean: {}
-
-search_emails:
-  name: Search emails (advanced IMAP)
-  description: >
-    Search using raw standard IMAP SEARCH criteria. Intended for advanced
-    queries; for normal automations use Find emails.
-  fields:
-    config_entry_id:
-      name: Account
-      description: Required when more than one Gmail account is configured.
-      required: false
-      selector:
-        config_entry:
-          integration: email_ha
-    folder:
-      name: Folder
-      description: IMAP folder to search. Message UIDs are folder-specific.
-      default: INBOX
-      selector:
-        text: {}
-    search_criteria:
-      name: IMAP search criteria
-      description: >
-        Standard IMAP criteria, not Gmail web search syntax. Examples: ALL,
-        UNSEEN, FROM "person@example.com", SUBJECT "renewal",
-        SINCE 01-Jul-2026.
-      default: ALL
-      selector:
-        text: {}
-    max_results:
-      name: Maximum results
-      description: Maximum number of newest matching messages to return (1-25).
-      default: 10
-      selector:
-        number:
-          min: 1
-          max: 25
-          mode: box
-    include_body:
-      name: Include body
-      description: Include bounded readable plain text. Off by default for privacy.
-      default: false
-      selector:
-        boolean: {}
-    body_max_chars:
-      name: Body character limit
-      description: Maximum plain-text body characters per message (1-20000).
-      default: 4000
-      selector:
-        number:
-          min: 1
-          max: 20000
-          mode: box
-
 find_emails:
   name: Find emails
   description: >
-    Find messages with UI-friendly filters. Populated filters combine with AND;
-    Gmail category and importance use Gmail's documented IMAP extension.
+    Find emails with friendly filters. Blank filters are ignored and all filled
+    conditions must match. Gmail performs the search on its server.
+  target: {}
   fields:
     config_entry_id:
       name: Account
-      description: Required when more than one Gmail account is configured.
+      description: Select the Gmail account. Required when multiple accounts are configured.
       required: false
       selector:
         config_entry:
           integration: email_ha
     folder:
       name: Folder
-      description: IMAP folder to search. Message UIDs are folder-specific.
+      description: Defaults to Inbox. Advanced users may enter another IMAP folder.
       default: INBOX
+      example: INBOX
       selector:
         text: {}
     from:
       name: From contains
-      selector:
-        text: {}
-    to:
-      name: To contains
-      selector:
-        text: {}
-    cc:
-      name: CC contains
+      description: "Match sender name or email address. Example: rsa.ie"
+      example: rsa.ie
       selector:
         text: {}
     subject:
       name: Subject contains
-      selector:
-        text: {}
-    body:
-      name: Body contains
-      description: Uses server-side IMAP BODY search; messages are not downloaded to filter.
-      selector:
-        text: {}
-    text:
-      name: Any text contains
-      description: Standard IMAP TEXT search across headers and body on the server.
+      description: "Match text in the subject. Example: booking"
+      example: booking
       selector:
         text: {}
     read_state:
       name: Read state
+      description: Match any email, unread email, or read email.
       default: any
       selector:
         select:
@@ -161,6 +46,7 @@ find_emails:
               value: read
     starred_state:
       name: Starred state
+      description: Optionally require emails to be starred or not starred.
       default: any
       selector:
         select:
@@ -173,6 +59,7 @@ find_emails:
               value: not_starred
     important_state:
       name: Gmail importance
+      description: Optionally match Gmail's Important classification.
       default: any
       selector:
         select:
@@ -185,7 +72,7 @@ find_emails:
               value: not_important
     gmail_category:
       name: Gmail category
-      description: Gmail classification queried through IMAP X-GM-RAW.
+      description: Optionally match Gmail's Primary, Updates, Promotions, Social, or Forums classification.
       default: any
       selector:
         select:
@@ -194,31 +81,115 @@ find_emails:
               value: any
             - label: Primary
               value: primary
+            - label: Updates
+              value: updates
             - label: Promotions
               value: promotions
             - label: Social
               value: social
-            - label: Updates
-              value: updates
             - label: Forums
               value: forums
-    since:
-      name: Since date
-      description: Inclusive, date-based IMAP SINCE filter.
+    more_filters:
+      collapsed: true
+      fields:
+        to:
+          name: To contains
+          description: Match a recipient name or email address in the To header.
+          example: home@example.com
+          selector:
+            text: {}
+        cc:
+          name: CC contains
+          description: Match a recipient name or email address in the CC header.
+          example: accounts@example.com
+          selector:
+            text: {}
+        body:
+          name: Body contains
+          description: Search body text on Gmail's server without downloading every message into Home Assistant.
+          example: confirmation number
+          selector:
+            text: {}
+        text:
+          name: Any text contains
+          description: Search message headers and body text on Gmail's server.
+          example: Dublin
+          selector:
+            text: {}
+        since:
+          name: Since
+          description: Match emails on or after this date.
+          selector:
+            date: {}
+        before:
+          name: Before
+          description: Match emails before this date.
+          selector:
+            date: {}
+        "on":
+          name: "On"
+          description: Match emails on this date.
+          selector:
+            date: {}
+    result_options:
+      collapsed: true
+      fields:
+        max_results:
+          name: Maximum results
+          description: Maximum number of newest matching emails to return, from 1 to 25.
+          default: 10
+          selector:
+            number:
+              min: 1
+              max: 25
+              mode: box
+        include_body:
+          name: Include body
+          description: Also retrieve bounded readable email text. This may expose private message content to the automation.
+          default: false
+          selector:
+            boolean: {}
+        body_max_chars:
+          name: Body character limit
+          description: Maximum readable body characters returned per email. Used only when Include body is enabled.
+          default: 4000
+          selector:
+            number:
+              min: 1
+              max: 20000
+              mode: box
+
+search_emails:
+  name: "Advanced: Search using IMAP query"
+  description: >
+    Search using raw IMAP SEARCH criteria. This is for advanced users; most
+    automations should use Find emails.
+  target: {}
+  fields:
+    config_entry_id:
+      name: Account
+      description: Select the Gmail account. Required when multiple accounts are configured.
+      required: false
       selector:
-        date: {}
-    before:
-      name: Before date
-      description: Exclusive, date-based IMAP BEFORE filter.
+        config_entry:
+          integration: email_ha
+    folder:
+      name: Folder
+      description: IMAP folder to search. UIDs are only valid in this folder.
+      default: INBOX
+      example: INBOX
       selector:
-        date: {}
-    "on":
-      name: On date
-      description: Date-based IMAP ON filter.
+        text: {}
+    search_criteria:
+      name: IMAP search criteria
+      description: 'Standard IMAP criteria, not Gmail web syntax. Example: UNSEEN FROM "person@example.com"'
+      default: ALL
+      example: 'UNSEEN FROM "person@example.com"'
       selector:
-        date: {}
+        text: {}
     max_results:
       name: Maximum results
+      description: Maximum number of newest matching emails to return, from 1 to 25.
       default: 10
       selector:
         number:
@@ -227,13 +198,13 @@ find_emails:
           mode: box
     include_body:
       name: Include body
-      description: Include bounded readable plain text. Off by default for privacy.
+      description: Also retrieve bounded readable email text. This may expose private message content to the automation.
       default: false
       selector:
         boolean: {}
     body_max_chars:
       name: Body character limit
-      description: Ignored unless Include body is enabled.
+      description: Maximum readable body characters returned per email.
       default: 4000
       selector:
         number:
@@ -241,34 +212,37 @@ find_emails:
           max: 20000
           mode: box
 
-get_message:
-  name: Get message
+get_email_contents:
+  name: Get email contents
   description: >
-    Retrieve readable content for one message after identifying its UID. The UID
-    belongs to the selected folder and full content may contain private data.
+    Retrieve bounded readable content for one email. Use the email UID returned
+    by Find emails or the New email event.
+  target: {}
   fields:
     config_entry_id:
       name: Account
-      description: Required when more than one Gmail account is configured.
+      description: Select the Gmail account. Required when multiple accounts are configured.
       required: false
       selector:
         config_entry:
           integration: email_ha
     folder:
       name: Folder
-      description: Folder containing the UID. IMAP UIDs are not global.
+      description: Folder containing the email UID. UIDs are folder-specific.
       default: INBOX
+      example: INBOX
       selector:
         text: {}
     uid:
-      name: UID
-      description: Numeric IMAP UID in the selected folder.
+      name: Email UID
+      description: Use the UID returned by Find emails or the New email event.
+      example: "12345"
       required: true
       selector:
         text: {}
     body_max_chars:
       name: Body character limit
-      description: Maximum readable plain-text body characters (1-20000).
+      description: Maximum readable body characters to return, from 1 to 20000.
       default: 12000
       selector:
         number:

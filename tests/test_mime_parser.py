@@ -34,8 +34,8 @@ def test_plain_message_metadata_and_truncation() -> None:
         "<parent@example.com>",
     ]
     assert result["plain_text_body"] == "First paragraph.\n\nSe"
-    assert result["body_text"] == result["plain_text_body"]
     assert result["body_truncated"] is True
+    assert "body_text" not in result
 
 
 def test_html_only_message_is_text_without_active_or_remote_content() -> None:

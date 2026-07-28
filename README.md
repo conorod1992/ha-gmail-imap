@@ -1,356 +1,363 @@
-# Email HA: read-only Gmail IMAP for Home Assistant
+# Email HA
 
-Email HA connects Home Assistant to Gmail through OAuth 2.0 and IMAP. It
-provides mailbox sensors, a new-email event, and structured response actions
-for locating and explicitly retrieving email. The integration domain remains
-`email_ha` for compatibility.
+Read-only Gmail integration for Home Assistant.
 
-This project is a fork of
-[PineappleEmperor/email-ha](https://github.com/PineappleEmperor/email-ha) and
-retains its licence and attribution.
+Email HA signs in through Google OAuth, listens for new mail with Gmail IMAP
+IDLE, and exposes useful Gmail concepts without requiring ordinary users to
+understand IMAP.
 
-## Security model
+## What you get
 
-- Gmail access uses TLS on `imap.gmail.com:993` and XOAUTH2.
-- Every folder is opened read-only and retrieval uses `BODY.PEEK`, so actions do
-  not intentionally change `\Seen` or other flags.
-- There are no send, reply, forward, delete, move, label, flag, attachment
-  download, or other mailbox mutation actions.
-- Search returns headers by default. Message bodies are retrieved only when
-  explicitly requested and are capped at 20,000 characters.
-- IMAP header fetches are capped at 64 KiB and explicit message fetches at 2 MB
-  before parsing, limiting exposure to maliciously oversized messages.
-- Attachment metadata may be returned, but attachment bytes are never returned,
-  logged, or saved.
-- HTML is converted locally to readable plain text. Scripts, images, links, and
-  other remote resources are never loaded. Raw or sanitized HTML is not exposed.
+- Primary unread and other Gmail category, Important, and Starred sensors
+- Latest email metadata
+- a New email event entity for UI-built automations
+- custom server-side email count sensors
+- a friendly `email_ha.find_emails` action
+- explicit, bounded email-body retrieval
+- an advanced raw IMAP search action
+- multiple Gmail accounts
 
-Google documents `https://mail.google.com/` as the scope for ordinary IMAP,
-POP, and SMTP OAuth access. The narrower Gmail API read-only scope does not
-authenticate a normal IMAP session. See Google's
-[XOAUTH2 protocol documentation](https://developers.google.com/workspace/gmail/imap/xoauth2-protocol).
-
-## Features
-
-- unread, total, folder-count, and latest-email sensors;
-- discoverable New email event entity plus the backwards-compatible
-  `email_ha_new_email` bus event, without complete message bodies;
-- `email_ha.find_emails` for UI-friendly structured searches;
-- `email_ha.search_emails` for advanced raw IMAP searches;
-- `email_ha.get_message` for explicit folder-specific retrieval;
-- backwards-compatible `email_ha.query_emails` action;
-- multiple Gmail accounts with explicit account selection when ambiguous.
-
-Thread reconstruction and recent-hours convenience actions are intentionally
-deferred from this first secure retrieval phase.
+The recommended first setup enables **Primary unread**, **Latest email**, and
+**New email**. All other built-in entities remain available from **Configure >
+Gmail sensors**.
 
 ## Installation
 
 ### HACS custom repository
 
-This fork is not claimed to be in the default HACS catalogue.
-
-1. Open HACS, choose **Integrations**, then **Custom repositories**.
+1. Open HACS and choose **Integrations > Custom repositories**.
 2. Add `https://github.com/conorod1992/ha-gmail-imap` as an **Integration**.
 3. Install **Email HA** and restart Home Assistant.
 
-To update later, use HACS' update action and restart Home Assistant when asked.
-
-### Manual
+### Manual installation
 
 Copy `custom_components/email_ha` into
 `<home-assistant-config>/custom_components/email_ha`, then restart Home
 Assistant.
 
-## Google OAuth setup
+## Google sign-in setup
 
-1. In [Google Cloud Console](https://console.cloud.google.com/), create or select
-   a project and configure its OAuth consent screen.
-2. If the app is in testing mode, add every Gmail account that will connect as a
-   test user.
-3. Create an OAuth 2.0 client of type **Web application**.
-4. Add Home Assistant's external callback URL as an authorized redirect URI:
+Google requires each installation to provide its own OAuth client. Email HA
+cannot safely put a shared client secret in a public repository, and Home
+Assistant's application-credentials framework cannot remove this provider
+requirement without a separately operated cloud account-linking service.
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/) and create or
+   select a project.
+2. Open **Google Auth Platform** and configure the consent screen. For a
+   personal project, choose an external audience. Add the Gmail account under
+   **Test users** while the app is in testing.
+3. Add the OAuth scope `https://mail.google.com/`. Google documents this scope
+   for Gmail IMAP OAuth access. It is a broad mailbox scope; the read-only
+   guarantee comes from Email HA exposing only read-only IMAP operations.
+4. Open **APIs & Services > Credentials**, create an **OAuth client ID**, and
+   select **Web application**.
+5. Add this authorized redirect URI exactly:
    `https://my.home-assistant.io/redirect/oauth`
-5. In Home Assistant, open **Settings > Devices & services > Application
-   credentials**, add credentials for **Email HA**, and enter the client ID and
-   client secret.
-6. Add the Email HA integration and complete Google's consent flow.
+6. In Home Assistant, open **Settings > Devices & services > Application
+   credentials**, choose **Add application credentials**, select **Email HA**,
+   and paste the client ID and client secret.
+7. Add the Email HA integration, enter the Gmail address, and sign in with
+   Google.
 
-The Gmail REST API is not called by this integration; it uses Gmail's IMAP
-OAuth protocol. Creating the OAuth consent screen and web client is required,
-but enabling the Gmail API is not required for the implemented IMAP transport.
-Home Assistant's redirect helper forwards to the instance's
-`/auth/external/callback` endpoint. Ensure the instance's internal/external URL
-configuration allows the browser to return to Home Assistant.
+Email HA does not call the Gmail REST API, so enabling the Gmail API is not a
+prerequisite. The integration authenticates directly to `imap.gmail.com` using
+OAuth2.
 
-Tokens are held in Home Assistant's config entry by the built-in OAuth helper.
-The helper refreshes expired access tokens using the stored refresh token.
-If access is revoked, use **Reconfigure/Reauthenticate** on the integration.
+Personal Gmail accounts no longer have an Enable IMAP switch: Google states
+that IMAP has been always enabled since January 2025. Google Workspace
+administrators can still restrict IMAP for their organisation, so a managed
+account may require its administrator to allow IMAP access. See Google's
+[Gmail client guidance](https://support.google.com/mail/answer/7126229) and
+[Workspace administrator guidance](https://support.google.com/a/answer/9003945).
 
-## Accounts, sensors, and events
+If setup reports missing credentials, complete steps 1-6 first. If Google
+rejects access, check the redirect URI, consent-screen status, requested scope,
+and test-user list. A callback failure usually means Home Assistant's external
+URL cannot return the browser to the instance.
 
-Each Gmail address is a separate config entry and may reuse the same Application
-Credentials client. If exactly one loaded account exists, action calls may omit
-`config_entry_id`. With multiple accounts, select one; no arbitrary default is
-chosen.
+## First setup
 
-Existing config entries and entity unique IDs are preserved. Sensors include:
+After Google sign-in, Email HA shows a simple Gmail entity list. Recommended
+entities are already selected:
 
-- unread count;
-- total message count;
-- selectable folder count and names;
-- latest email subject and bounded metadata.
+- **Primary unread** — unread mail Gmail classifies as Primary
+- **Latest email** — subject and bounded header metadata for the newest email
+- **New email** — an EventEntity for automations
 
-The existing unread sensor still means IMAP `UNSEEN` in the configured folder
-(normally `INBOX`). Its unique ID remains `<config-entry-id>_unread_count`, so
-existing automations and entity customisations are not silently redefined.
+Select any additional Gmail entities you already want, then finish setup. The
+account appears as one service device named `Gmail - you@example.com`.
 
-### Gmail Inbox versus Primary
+New mail normally arrives through Gmail IMAP IDLE. A fixed internal 15-minute
+refresh provides resilience if a push is missed; there is no misleading poll
+interval to configure.
 
-Gmail's IMAP `INBOX` represents every message carrying the Inbox label. It can
-therefore include messages Gmail's web interface classifies as Primary,
-Promotions, Social, Updates, or Forums. An IMAP unread count of 340 can
-legitimately coexist with 0 unread in the web UI's Primary tab.
+## Gmail sensors
 
-Gmail does not expose category tabs as ordinary IMAP folders. It does,
-however, officially extend IMAP `SEARCH` with `X-GM-RAW`, whose single argument
-uses Gmail search syntax. Email HA uses that documented extension only when a
-configured structured search selects a Gmail category or importance state. For
-example, Primary + Unread becomes the AND-combined IMAP search tokens
-`UNSEEN X-GM-RAW "category:primary"`. This reflects Gmail's category
-classification; a web UI setting such as **Include starred in Primary** can
-make the visible tab differ from a pure `category:primary` count.
+Open **Settings > Devices & services > Email HA > Configure > Gmail sensors**
+to manage the desired entity set in one screen.
 
-See Google's [IMAP extension documentation](https://developers.google.com/workspace/gmail/imap/imap-extensions)
-and [category behavior](https://support.google.com/mail/answer/3094499).
+| Entity | Meaning | Recommended |
+|---|---|---:|
+| Primary unread | Unread messages Gmail classifies as Primary | Yes |
+| Latest email | Newest email subject and selected header metadata | Yes |
+| New email | Event entity for each newly detected email | Yes |
+| Inbox unread | All unread messages carrying the Gmail Inbox label | No |
+| Important unread | Unread mail Gmail classifies as Important | No |
+| Starred unread | Unread mail with the Starred flag | No |
+| Updates unread | Unread Updates mail | No |
+| Promotions unread | Unread Promotions mail | No |
+| Social unread | Unread Social mail | No |
+| Forums unread | Unread Forums mail | No |
+| Inbox messages | Total messages carrying the Inbox label | No |
+| Mailbox folders | Count and list of selectable folders | No |
 
-The supported classifications map to IMAP as follows:
+### Primary unread versus Inbox unread
 
-| Gmail view | Reliable IMAP query | Notes |
+**Primary unread** is what many people mean by useful unread inbox mail: Gmail
+has classified it into the Primary category.
+
+**Inbox unread** counts every unread message with the Inbox label, including
+messages that may appear under Promotions, Social, Updates, or Forums. The two
+numbers can therefore differ substantially.
+
+Gmail category and importance counts use Gmail's documented `X-GM-RAW` IMAP
+extension. Starred uses the standard IMAP `\Flagged` state. These details are
+not needed for normal setup.
+
+## Custom email sensors
+
+Choose **Configure > Custom email sensors** to view, add, edit, duplicate, or
+delete count sensors. The management list shows enough of each private filter
+to identify it; entity attributes expose only filter field names, not values.
+
+The first form contains common filters. Turn on **Add more filters** for To, CC,
+body text, any text, and date filters. Blank fields are ignored and all filled
+conditions must match.
+
+Examples:
+
+| Name | Folder | Filters |
 |---|---|---|
-| Primary | `X-GM-RAW "category:primary"` | Gmail classification, not a folder or flag |
-| Promotions | `X-GM-RAW "category:promotions"` | Gmail classification |
-| Social | `X-GM-RAW "category:social"` | Gmail classification |
-| Updates | `X-GM-RAW "category:updates"` | Gmail classification |
-| Forums | `X-GM-RAW "category:forums"` | Gmail classification |
-| Important | `X-GM-RAW "is:important"` | Gmail importance classification; Gmail also exposes labels through `X-GM-LABELS` |
-| Starred | `FLAGGED` | Standard IMAP `\Flagged` state |
+| RSA unread | Inbox | From contains `rsa.ie`; Read state `Unread` |
+| Bookings | Inbox | Subject contains `booking`; Read state `Unread` |
+| Starred Primary | Inbox | Gmail category `Primary`; Starred state `Starred` |
 
-The category queries are reliable Gmail server-side classifications because
-Google documents both `X-GM-RAW` and the listed `category:` operators. They are
-Gmail-specific and are not presented as portable IMAP behavior.
+Gmail performs custom sensor searches server-side. Email HA retrieves only the
+matching UID count and newest matching UID; it does not download bodies to
+calculate a count. Up to 20 custom sensors can be configured per account.
 
-### Optional email search sensors
+Discovered folders are offered in the folder selector. An exact folder name
+can still be entered for advanced or localised Gmail folder layouts.
 
-After connecting an account, open its **Configure** dialog. Choose **Add Gmail
-inbox sensors** for convenient optional presets: Primary unread, Important
-unread, Starred unread, Promotions unread, Social unread, Updates unread, or
-Forums unread. Select only the sensors you want; none are created by default.
+## Automations
 
-Choose **Add email search sensor** for a custom sensor with a user-facing name,
-folder, and the same structured filters as `find_emails`. For example,
-configure `RSA unread` with folder `INBOX`, From contains `rsa.ie`, and Read
-state `unread`; its state is the number of matching messages.
+### Notify when any new email arrives
 
-All optional sensors run through the account's existing coordinator and IMAP
-session. They use server-side `UID SEARCH`, count returned UIDs, and do not
-fetch headers or message bodies. Their attributes contain only the folder,
-filter field names, and newest matching UID—not filter values or email bodies.
-Up to 20 may be configured per account to keep refresh work bounded.
-
-### New-email automations
-
-Each account exposes a **New email** event entity on its Gmail device. On Home
-Assistant 2026.7 or newer, choose **Event received** in the automation editor,
-select that entity, and select the `new_email` event type. For YAML automations:
+In the automation editor, choose the **Event received** trigger, select the
+account's **New email** entity, and select event type `new_email`.
 
 ```yaml
 triggers:
   - trigger: event.received
     target:
-      entity_id: event.gmail_example_new_email
+      entity_id: event.gmail_you_example_com_new_email
     options:
       event_type:
         - new_email
 actions:
-  - action: persistent_notification.create
+  - action: notify.mobile_app_your_phone
     data:
       title: New email
       message: >-
+        {{ trigger.to_state.attributes.sender_name }}:
         {{ trigger.to_state.attributes.subject or '(no subject)' }}
 ```
 
-Replace the example entity ID with the entity created for your account. The
-event entity exposes bounded attributes including account, folder, UID,
-subject, sender, and date, never a complete body. It fires only after the
-initial refresh has established a UID baseline.
+Select the real entity in the UI instead of copying the example entity ID.
+Event data contains account, folder, UID, Message-ID when available, subject,
+sender name/address, and date. It never contains a message body.
 
-For backwards compatibility, the integration also continues to fire the raw
-`email_ha_new_email` bus event with the same payload. Existing automations using
-the **Manual event received** trigger do not need to change; that trigger also
-remains the compatible option on older supported Home Assistant releases.
+### Notify only for a specific sender
+
+```yaml
+triggers:
+  - trigger: event.received
+    target:
+      entity_id: event.gmail_you_example_com_new_email
+    options:
+      event_type:
+        - new_email
+conditions:
+  - condition: template
+    value_template: >-
+      {{ 'rsa.ie' in (trigger.to_state.attributes.sender_address | lower) }}
+actions:
+  - action: notify.mobile_app_your_phone
+    data:
+      message: "{{ trigger.to_state.attributes.subject }}"
+```
+
+### Run when Primary unread becomes greater than zero
+
+```yaml
+triggers:
+  - trigger: numeric_state
+    entity_id: sensor.gmail_you_example_com_primary_unread
+    above: 0
+actions:
+  - action: persistent_notification.create
+    data:
+      title: Primary Gmail
+      message: You have unread Primary email.
+```
+
+### Find emails with a response variable
+
+```yaml
+actions:
+  - action: email_ha.find_emails
+    data:
+      from: rsa.ie
+      subject: renewal
+      read_state: unread
+      max_results: 5
+    response_variable: found_mail
+  - action: persistent_notification.create
+    data:
+      title: RSA email count
+      message: "Found {{ found_mail.count }} matching emails."
+```
+
+### Find an email and explicitly retrieve its body
+
+```yaml
+actions:
+  - action: email_ha.find_emails
+    data:
+      subject: booking
+      max_results: 1
+    response_variable: found_mail
+  - if: "{{ found_mail.count > 0 }}"
+    then:
+      - action: email_ha.get_email_contents
+        data:
+          folder: "{{ found_mail.folder }}"
+          uid: "{{ found_mail.emails[0].uid }}"
+          body_max_chars: 4000
+        response_variable: selected_email
+      - action: persistent_notification.create
+        data:
+          title: "{{ selected_email.message.subject }}"
+          message: "{{ selected_email.message.plain_text_body }}"
+```
 
 ## Actions
 
-All actions return dictionaries and arrays suitable for `response_variable`.
+### Find emails
 
-### `email_ha.find_emails`
+`email_ha.find_emails` is the normal action. It provides friendly From, To, CC,
+Subject, Body, Any text, read, starred, importance, category, and date fields.
+Blank filters are ignored; filled filters combine with AND.
 
-Use this action for normal automations. Populated fields combine with logical
-AND and are converted to validated IMAP tokens without constructing and
-reparsing a raw command string.
+Searches return newest matches first and include metadata only by default. Set
+`include_body: true` only when the automation needs bounded readable content.
+The body limit is 1-20,000 characters per message and result count is limited
+to 1-25.
 
-```yaml
-action: email_ha.find_emails
-data:
-  from: notifications@example.com
-  subject: booking
-  read_state: unread
-  since: "2026-07-01"
-  max_results: 10
-response_variable: email_results
-```
+### Get email contents
 
-Supported filters include From, To, CC, Subject, server-side Body, server-side
-Text, read state, starred state, Gmail category/importance, and date-based
-Since, Before, or On. IMAP date searches have day resolution. `include_body`
-defaults to false, and `body_max_chars` is ignored unless body inclusion is
-enabled.
+`email_ha.get_email_contents` retrieves one folder-specific UID returned by
+Find emails or the New email event. It uses read-only `BODY.PEEK` and returns a
+plain/readable bounded body plus attachment metadata. UIDs are valid only in
+their folder.
 
-The response includes `account`, `folder`, the populated `filters`, `count`,
-`emails`, and `truncated`. Message dictionaries use the shape documented below.
+### Advanced: Search using IMAP query
 
-### `email_ha.search_emails` (advanced IMAP)
-
-This existing action remains backwards compatible and accepts raw standard
-IMAP criteria for advanced searches. Gmail web syntax such as
-`from:person@example.com is:unread category:primary` is not standard IMAP
-SEARCH syntax. Gmail-specific raw searches must explicitly use the documented
-`X-GM-RAW` extension.
-
-| Field | Default | Limits |
-|---|---:|---:|
-| `config_entry_id` | single loaded account | required if ambiguous |
-| `folder` | `INBOX` | non-empty folder name |
-| `search_criteria` | `ALL` | 1,000 characters / 40 tokens |
-| `max_results` | `10` | 1-25 |
-| `include_body` | `false` | opt-in private content |
-| `body_max_chars` | `4000` | 1-20,000 per message |
+`email_ha.search_emails` accepts raw standard IMAP SEARCH criteria such as:
 
 ```yaml
 action: email_ha.search_emails
 data:
-  search_criteria: 'UNSEEN FROM "example@example.com"'
-  max_results: 5
-response_variable: email_results
-```
-
-Response shape:
-
-```yaml
-account: example@gmail.com
-folder: INBOX
-search_criteria: 'UNSEEN FROM "example@example.com"'
-count: 1
-emails:
-  - uid: "12345"
-    message_id: "<message-id@example.com>"
-    in_reply_to: null
-    references: []
-    subject: Example
-    sender:
-      name: Example Sender
-      address: sender@example.com
-    to: []
-    cc: []
-    reply_to: []
-    date: "2026-07-24T15:30:00+01:00"
-    internal_date: "24-Jul-2026 15:30:01 +0100"
-    flags: []
-    folder: INBOX
-    preview: ""
-    has_attachments: false
-    attachments: []
-truncated: false
-```
-
-Without `include_body`, only the RFC header block is fetched, so `preview` is
-empty and attachment presence is unknown. With `include_body: true`, the
-response additionally includes `plain_text_body`, `body_text` (legacy alias),
-`body_truncated`, a preview, and attachment metadata.
-
-Useful IMAP criteria:
-
-| Goal | Criteria |
-|---|---|
-| Everything | `ALL` |
-| Unread | `UNSEEN` |
-| Sender | `FROM "person@example.com"` |
-| Subject | `SUBJECT "renewal"` |
-| Since an IMAP date | `SINCE 01-Jul-2026` |
-| Combined | `UNSEEN FROM "person@example.com"` |
-
-Both search actions share the same lower-level fetch and MIME parser. Tests
-cover the complete action setting path: false performs a header-only
-`BODY.PEEK[HEADER]` fetch, while true performs bounded `BODY.PEEK[]` retrieval
-and returns `plain_text_body`, its compatibility alias `body_text`, and
-`body_truncated`.
-
-### `email_ha.get_message`
-
-Use this only after identifying a specific message. An IMAP UID is unique only
-within its folder and may change when a message is copied or moved.
-
-| Field | Default | Limits |
-|---|---:|---:|
-| `config_entry_id` | single loaded account | required if ambiguous |
-| `folder` | `INBOX` | folder containing the UID |
-| `uid` | required | decimal UID |
-| `body_max_chars` | `12000` | 1-20,000 |
-
-```yaml
-action: email_ha.get_message
-data:
   folder: INBOX
-  uid: "{{ email_results.emails[0].uid }}"
-  body_max_chars: 12000
-response_variable: email_message
-```
-
-The response contains `account`, `folder`, and `message`. The message uses the
-same metadata keys as search plus `plain_text_body`, `body_text`,
-`body_truncated`, and attachment metadata. HTML is not returned.
-
-### `email_ha.query_emails` (legacy)
-
-Existing automations keep the action name, existing fields, and top-level
-`emails` key. It now uses the same read-only parser and safety limits as search.
-`include_attachments` remains accepted, but attachment data is no longer
-returned; only metadata is available when `include_full_body` is true. The
-maximum result count is now 25 as a deliberate privacy/resource bound.
-
-```yaml
-action: email_ha.query_emails
-data:
-  folder: INBOX
-  search_criteria: 'SUBJECT "invoice"'
+  search_criteria: 'UNSEEN FROM "person@example.com"'
   max_results: 5
-response_variable: legacy_results
+response_variable: advanced_results
 ```
 
-## Privacy and troubleshooting
+This action is intended for users who already understand IMAP. Gmail web-search
+syntax is not standard IMAP syntax; Gmail-specific raw expressions require the
+documented `X-GM-RAW` extension.
 
-- Action responses can contain private email. Expose these actions selectively
-  to conversation agents and keep result/body limits small.
-- Search errors usually mean malformed criteria or an inaccessible folder.
-- Authentication errors require reauthentication; never paste tokens into logs
-  or issue reports.
-- If setup cannot return from Google, verify Home Assistant's URL settings and
-  the OAuth redirect URI.
-- If IMAP is restricted by a Google Workspace administrator, ask that
-  administrator to allow the account/client.
+## Multiple accounts
 
-For temporary debugging:
+Add the integration once for each Gmail address. Accounts can reuse the same
+Google OAuth client. Every account has its own device, coordinator, UID
+baseline, and New email entity.
+
+Actions automatically use the only loaded account. When more than one account
+is loaded, select **Account** in the action UI so no arbitrary account is used.
+
+## Privacy and security
+
+- OAuth2 tokens are managed by Home Assistant's application-credentials helper.
+- Gmail IMAP requires Google's broad `https://mail.google.com/` OAuth scope;
+  unlike a Gmail REST API scope, there is no narrower read-only IMAP scope. The
+  integration enforces read-only behaviour by its implemented command surface.
+- All Gmail traffic uses TLS and XOAUTH2.
+- Folders are opened read-only with IMAP `EXAMINE`.
+- Fetches use `BODY.PEEK`, so retrieval does not intentionally mark mail read.
+- Count sensors use server-side searches and do not fetch message bodies.
+- Find emails and advanced search omit bodies by default.
+- Body retrieval is explicit, bounded to 20,000 readable characters, and capped
+  at 2 MB of source message data before parsing.
+- HTML is converted locally to readable text. Scripts, remote images, tracking
+  pixels, styles, and links are not loaded.
+- Attachment metadata may be returned; attachment bytes are never downloaded or
+  exposed.
+- Email HA has no send, reply, forward, delete, move, label, star, flag, or
+  mark-read/unread operation.
+
+Be deliberate when exposing action responses to notifications, logs,
+conversation agents, or other automations because explicitly retrieved content
+can be private.
+
+## Advanced account and IMAP behaviour
+
+**Configure > Advanced account settings** can change the folder used by Latest
+email and New email. Inbox is recommended. Fixed Gmail count sensors keep their
+documented Inbox meaning regardless of this setting.
+
+Gmail IMAP UIDs are monotonically increasing only within one folder and one
+UIDVALIDITY generation. Email HA records UIDVALIDITY and UIDNEXT on initial
+startup, emits nothing for existing mail, and then fetches only UIDs above that
+baseline. This prevents deleting or moving the newest email from making an
+older message look new. Multiple arrivals are emitted oldest UID to newest UID.
+To keep work bounded, a single refresh emits at most the newest 25 arrivals and
+advances the baseline; skipped bursts are logged without replaying old mail.
+
+IDLE reconnects retain the baseline. Reloading the integration establishes a
+fresh baseline, so existing messages are not replayed. UIDs copied or moved to
+another folder receive folder-specific identity and may be new within that
+folder.
+
+Google documents Gmail's category/importance search support in its
+[IMAP extensions](https://developers.google.com/workspace/gmail/imap/imap-extensions).
+
+## Troubleshooting
+
+- **Missing application credentials:** complete the Google sign-in setup before
+  adding the integration.
+- **Google rejected access:** verify the consent screen, test user, exact scope,
+  client secret, and redirect URI.
+- **Managed account cannot connect:** ask the Workspace administrator whether
+  IMAP and the OAuth app are allowed.
+- **Folder unavailable:** choose a discovered folder under Configure or copy its
+  exact IMAP identifier.
+- **No immediate update:** Gmail IDLE is the normal path; the internal resilience
+  refresh runs every 15 minutes.
+
+Temporary debug logging can be enabled with:
 
 ```yaml
 logger:
@@ -358,34 +365,12 @@ logger:
     custom_components.email_ha: debug
 ```
 
-Restart after changing logging. Review logs before sharing them; this
-integration avoids bodies and tokens, but account identifiers and operational
-metadata may still be sensitive.
-
-## Known limitations
-
-- This phase is Gmail-specific despite using standard IMAP primitives.
-- Search order is newest UID first, which is normally arrival order but is not a
-  universal date sort.
-- IMAP `SEARCH` dates have day resolution and are not Gmail web-search syntax.
-- Category and importance filters require Gmail's documented `X-GM-RAW` IMAP
-  extension; they are not offered as portable behavior for other IMAP servers.
-- Gmail's optional **Include starred in Primary** presentation setting is not
-  part of the `category:primary` classification query.
-- UIDs are folder-specific; no native Gmail thread object is exposed.
-- Header-only searches cannot report previews or attachment metadata without
-  fetching message content.
-- Messages larger than the 2 MB retrieval cap are parsed on a best-effort basis
-  and may report incomplete content or attachment metadata.
-- Last-received/today-count entities were not added because optional search
-  sensors already cover the count use cases without multiplying default
-  entities. Persistent multi-message event replay, safe HTML output,
-  recent-hours search, thread reconstruction, and diagnostics remain deferred.
+Review logs before sharing them. Email HA does not log tokens or bodies, but
+account identifiers and operational metadata can still be sensitive.
 
 ## Development validation
 
-The repository provides pytest requirements and Ruff configuration. Typical
-checks are:
+Local checks:
 
 ```text
 python -m pytest

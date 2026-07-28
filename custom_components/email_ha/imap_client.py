@@ -156,7 +156,9 @@ class ImapClient:
     async def get_folder_status(self, folder: str) -> dict[str, int]:
         """Return message and unseen counts for a folder."""
         folder = validate_imap_folder(folder)
-        response = await self._require_client().status(folder, "(MESSAGES UNSEEN)")
+        response = await self._require_client().status(
+            folder, "(MESSAGES UNSEEN UIDVALIDITY UIDNEXT)"
+        )
         if response.result != "OK":
             raise ImapFolderError("The selected folder is not accessible")
         result = {"messages": 0, "unseen": 0}
@@ -164,7 +166,7 @@ class ImapClient:
             text = (
                 line.decode(errors="replace") if isinstance(line, bytes) else str(line)
             )
-            for key in ("MESSAGES", "UNSEEN"):
+            for key in ("MESSAGES", "UNSEEN", "UIDVALIDITY", "UIDNEXT"):
                 if match := re.search(rf"{key} (\d+)", text):
                     result[key.lower()] = int(match.group(1))
         return result
@@ -174,17 +176,11 @@ class ImapClient:
         folder: str,
         criteria: str = "ALL",
         max_results: int = 10,
-        include_full_body: bool = False,
-        include_attachments: bool = False,
         *,
+        include_body: bool = False,
         body_max_chars: int = 4000,
     ) -> list[dict[str, Any]]:
-        """Search one folder and return newest matching messages first.
-
-        ``include_attachments`` remains accepted for legacy callers. Attachment
-        content is never returned; metadata is included when the body is parsed.
-        """
-        del include_attachments
+        """Search one folder and return newest matching messages first."""
         if not 1 <= max_results <= MAX_SEARCH_RESULTS:
             raise ValueError(f"max_results must be between 1 and {MAX_SEARCH_RESULTS}")
         if not 1 <= body_max_chars <= MAX_BODY_CHARS:
@@ -194,7 +190,7 @@ class ImapClient:
             folder,
             tokens,
             max_results,
-            include_body=include_full_body,
+            include_body=include_body,
             body_max_chars=body_max_chars,
         )
 
@@ -234,6 +230,29 @@ class ImapClient:
         uids = await self._search_uids(folder, validate_search_tokens(tokens))
         return len(uids), uids[-1] if uids else None
 
+    async def get_new_emails(
+        self, folder: str, after_uid: int, max_results: int
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Return bounded headers for UIDs newer than a known monotonic baseline."""
+        if after_uid < 0:
+            raise ValueError("after_uid must not be negative")
+        if not 1 <= max_results <= MAX_SEARCH_RESULTS:
+            raise ValueError(f"max_results must be between 1 and {MAX_SEARCH_RESULTS}")
+        uids = await self._search_uids(folder, ["UID", f"{after_uid + 1}:*"])
+        newer_uids = [uid for uid in uids if uid.isdecimal() and int(uid) > after_uid]
+        selected_uids = newer_uids[-max_results:]
+        messages = [
+            message
+            for uid in selected_uids
+            if (
+                message := await self._fetch_email(
+                    uid, folder, include_body=False, body_max_chars=1
+                )
+            )
+            is not None
+        ]
+        return messages, len(newer_uids)
+
     async def _search_uids(self, folder: str, tokens: Sequence[str]) -> list[str]:
         """Run a read-only UID SEARCH and return matching UIDs."""
         client = self._require_client()
@@ -251,7 +270,7 @@ class ImapClient:
         )
         return uid_text.strip().split()
 
-    async def get_message(
+    async def get_email_contents(
         self, folder: str, uid: str, *, body_max_chars: int
     ) -> dict[str, Any]:
         """Return one message by its folder-specific UID."""
@@ -279,6 +298,10 @@ class ImapClient:
         # which would incorrectly reject the following UID FETCH/SEARCH.
         if client.protocol is not None:
             client.protocol.state = "SELECTED"
+
+    async def select_folder_read_only(self, folder: str) -> None:
+        """Select a folder read-only before entering IMAP IDLE."""
+        await self._select_read_only(folder)
 
     async def _fetch_email(
         self,

@@ -59,7 +59,7 @@ jobs:
               --head "$BRANCH"
             PR_NUMBER=$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[0].number')
           else
-            gh pr edit "$PR_NUMBER" --body "$BODY"
+            echo "PR #$PR_NUMBER already exists; preserving its title and body"
           fi
           echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
 
