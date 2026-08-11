@@ -230,6 +230,22 @@ class ImapClient:
         uids = await self._search_uids(folder, validate_search_tokens(tokens))
         return len(uids), uids[-1] if uids else None
 
+    async def get_email_metadata(self, folder: str, uid: str) -> dict[str, Any] | None:
+        """Return bounded header metadata for one folder-specific UID."""
+        if not uid.isdecimal():
+            raise ValueError("UID must contain digits only")
+        await self._select_read_only(folder)
+        return await self._fetch_email(
+            uid, folder, include_body=False, body_max_chars=1
+        )
+
+    async def uid_matches(self, folder: str, uid: str, tokens: Sequence[str]) -> bool:
+        """Check structured criteria against exactly one folder-specific UID."""
+        if not uid.isdecimal():
+            raise ValueError("UID must contain digits only")
+        bounded = ["UID", uid, *validate_search_tokens(tokens)]
+        return uid in await self._search_uids(folder, bounded)
+
     async def get_new_emails(
         self, folder: str, after_uid: int, max_results: int
     ) -> tuple[list[dict[str, Any]], int]:

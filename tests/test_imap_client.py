@@ -141,6 +141,21 @@ async def test_count_search_does_not_fetch_messages() -> None:
 
 
 @pytest.mark.asyncio
+async def test_uid_match_is_bounded_to_one_new_message() -> None:
+    """Watch matching adds an exact UID constraint to the shared filter tokens."""
+    protocol = AsyncMock()
+    protocol.examine.return_value = _Response("OK", [b"1"])
+    protocol.uid_search.return_value = _Response("OK", [b"44"])
+    client = ImapClient("imap.gmail.com")
+    client._client = protocol  # noqa: SLF001
+
+    assert await client.uid_matches("INBOX", "44", ["FROM", '"rsa.ie"'])
+    protocol.uid_search.assert_awaited_once_with(
+        "UID", "44", "FROM", '"rsa.ie"', charset=None
+    )
+
+
+@pytest.mark.asyncio
 async def test_folder_control_characters_are_rejected() -> None:
     """Folder input cannot inject another IMAP command."""
     protocol = AsyncMock()

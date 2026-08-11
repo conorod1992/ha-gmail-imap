@@ -76,6 +76,7 @@ def test_attachment_metadata_never_contains_payload() -> None:
     )
 
     assert result["has_attachments"] is True
+    assert result["attachment_count"] == 1
     assert result["attachments"] == [
         {
             "filename": "document.pdf",

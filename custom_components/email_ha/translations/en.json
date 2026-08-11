@@ -37,27 +37,32 @@
   },
   "options": {
     "step": {
-      "init": {"title": "Manage Gmail", "menu_options": {"gmail_sensors": "Gmail sensors", "custom_sensors": "Custom email sensors", "advanced_account_settings": "Advanced account settings"}},
+      "init": {"title": "Manage Gmail", "menu_options": {"gmail_sensors": "Gmail sensors", "custom_sensors": "Custom email sensors", "email_watches": "Email watches", "advanced_account_settings": "Advanced account settings"}},
       "gmail_sensors": {"title": "Gmail sensors", "description": "Choose the Gmail entities you want for this account. Disabled entities remain discoverable and can be enabled here later.", "data": {"gmail_entities": "Enabled Gmail entities"}},
       "custom_sensors": {"title": "Custom email sensors", "description": "Add, edit, duplicate, or delete a sensor that counts matching email on Gmail's server.", "data": {"manage_action": "Choose an action"}},
+      "email_watches": {"title": "Email watches", "description": "Add, edit, duplicate, or delete a watch that fires an event only when a newly arriving email matches.", "data": {"manage_action": "Choose an action"}},
       "custom_sensor_common": {
         "title": "Custom email sensor",
         "description": "Only the number of matching emails is retrieved. Matching is performed by Gmail; message contents are not downloaded for this sensor. Only filled filters are used, and all filled conditions must match.",
-        "data": {"name": "Name", "folder": "Folder", "from": "From contains", "subject": "Subject contains", "read_state": "Read state", "gmail_category": "Gmail category", "important_state": "Gmail importance", "starred_state": "Starred state", "more_filters": "Add more filters"},
+        "data": {"name": "Name", "folder": "Folder", "from": "From contains", "subject": "Subject contains", "read_state": "Read state", "gmail_category": "Gmail category", "important_state": "Gmail importance", "starred_state": "Starred state", "attachment_state": "Attachment", "more_filters": "Add more filters"},
         "data_description": {"name": "A clear entity name, such as RSA unread or Bookings.", "folder": "Choose a discovered folder or enter its exact IMAP name.", "from": "Match sender name or address. Example: rsa.ie", "subject": "Match subject text. Example: booking", "more_filters": "Continue to recipient, body-text, any-text, and date filters. Turning this off clears those filters when editing."}
       },
-      "custom_sensor_advanced": {"title": "More custom sensor filters", "description": "These optional conditions are also combined with AND. Body and text matching happen on Gmail's server without downloading message bodies into Home Assistant.", "data": {"to": "To contains", "cc": "CC contains", "body": "Body contains", "text": "Any text contains", "since": "Since", "before": "Before", "on": "On"}},
+      "custom_sensor_advanced": {"title": "More custom sensor filters", "description": "These optional conditions are also combined with AND. Body and text matching happen on Gmail's server without downloading message bodies into Home Assistant.", "data": {"to": "To contains", "cc": "CC contains", "body": "Body contains", "text": "Any text contains", "attachment_filename": "Attachment filename contains", "since": "Since", "before": "Before", "on": "On"}},
       "delete_custom_sensor": {"title": "Delete {name}?", "description": "This removes the custom sensor definition and its entity after the integration reloads.", "data": {"confirm": "Delete this custom sensor"}},
+      "email_watch_common": {"title": "Email watch", "description": "Fires an event when Email HA observes a newly arriving message that matches every filled filter. Existing mail is not replayed and message bodies are not included.", "data": {"name": "Name", "folder": "Folder", "from": "From contains", "subject": "Subject contains", "read_state": "Read state", "gmail_category": "Gmail category", "important_state": "Gmail importance", "starred_state": "Starred state", "attachment_state": "Attachment", "more_filters": "Add more filters"}},
+      "email_watch_advanced": {"title": "More email watch filters", "description": "These optional conditions are combined with AND and checked only against newly detected messages.", "data": {"to": "To contains", "cc": "CC contains", "body": "Body contains", "text": "Any text contains", "attachment_filename": "Attachment filename contains", "since": "Since", "before": "Before", "on": "On"}},
+      "delete_email_watch": {"title": "Delete {name}?", "description": "This removes the Email watch and its event entity after the integration reloads.", "data": {"confirm": "Delete this email watch"}},
       "advanced_account_settings": {"title": "Advanced account settings", "description": "Gmail IMAP IDLE provides normal near-real-time updates; an internal 15-minute refresh is used only for resilience. The folder below affects Latest email and New email. Gmail count sensors always use Inbox.", "data": {"monitored_folder": "Latest email and New email folder"}, "data_description": {"monitored_folder": "Choose a discovered folder or enter an exact IMAP folder name. Inbox is recommended."}}
     },
-    "error": {"invalid_custom_sensor": "Check the name, folder, filters, and dates. Control characters are not allowed.", "invalid_folder": "Choose a non-empty folder without control characters."},
-    "abort": {"too_many_custom_sensors": "The maximum of 20 custom email sensors has been reached.", "custom_sensor_not_found": "That custom email sensor no longer exists.", "invalid_custom_sensor": "The custom email sensor contains invalid filters."}
+    "error": {"invalid_custom_sensor": "Check the name, folder, filters, and dates. Control characters are not allowed.", "invalid_email_watch": "Check the name, folder, filters, and dates. Control characters are not allowed.", "invalid_folder": "Choose a non-empty folder without control characters."},
+    "abort": {"too_many_custom_sensors": "The maximum of 20 custom email sensors has been reached.", "custom_sensor_not_found": "That custom email sensor no longer exists.", "invalid_custom_sensor": "The custom email sensor contains invalid filters.", "too_many_email_watches": "The maximum of 20 Email watches has been reached.", "email_watch_not_found": "That Email watch no longer exists.", "invalid_email_watch": "The Email watch contains invalid filters."}
   },
   "selector": {
     "gmail_entities": {"options": {"primary_unread": "Primary unread", "latest_email": "Latest email", "new_email": "New email event", "inbox_unread": "Inbox unread", "important_unread": "Important unread", "starred_unread": "Starred unread", "updates_unread": "Updates unread", "promotions_unread": "Promotions unread", "social_unread": "Social unread", "forums_unread": "Forums unread", "inbox_messages": "Inbox messages", "mailbox_folders": "Mailbox folders"}},
     "read_state": {"options": {"any": "Any", "unread": "Unread", "read": "Read"}},
     "starred_state": {"options": {"any": "Any", "starred": "Starred", "not_starred": "Not starred"}},
     "important_state": {"options": {"any": "Any", "important": "Important", "not_important": "Not important"}},
+    "attachment_state": {"options": {"any": "Any", "has_attachment": "Has attachment", "no_attachment": "No attachment"}},
     "gmail_category": {"options": {"any": "Any", "primary": "Primary", "updates": "Updates", "promotions": "Promotions", "social": "Social", "forums": "Forums"}}
   },
   "entity": {

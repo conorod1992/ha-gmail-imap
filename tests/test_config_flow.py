@@ -145,6 +145,80 @@ async def test_delete_removes_custom_entity_registry_entry(monkeypatch) -> None:
     assert flow.async_create_entry.call_args.kwargs["data"]["custom_sensors"] == []
 
 
+@pytest.mark.asyncio
+async def test_delete_email_watch_removes_event_registry_entry(monkeypatch) -> None:
+    """Deleting a watch cleans up its UUID-backed EventEntity registry entry."""
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        options={"email_watches": [{"id": "watch-1", "name": "RSA"}]},
+    )
+    flow = EmailHAOptionsFlow()
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_get_known_entry=Mock(return_value=entry))
+    )
+    flow.handler = "entry-1"
+    flow._watch_id = "watch-1"  # noqa: SLF001
+    flow.async_create_entry = Mock(return_value={"type": "create_entry"})
+    registry = Mock()
+    registry.async_get_entity_id.return_value = "event.gmail_rsa"
+    monkeypatch.setattr(
+        "custom_components.email_ha.config_flow.er.async_get",
+        Mock(return_value=registry),
+    )
+
+    await flow.async_step_delete_email_watch({"confirm": True})
+
+    registry.async_get_entity_id.assert_called_once_with(
+        "event", "email_ha", "entry-1_watch_watch-1"
+    )
+    registry.async_remove.assert_called_once_with("event.gmail_rsa")
+    assert flow.async_create_entry.call_args.kwargs["data"]["email_watches"] == []
+
+
+def test_watch_edit_keeps_id_and_duplicate_gets_new_id(monkeypatch) -> None:
+    """Watch names are mutable while persistent identity is not reused by copies."""
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        options={
+            "email_watches": [
+                {"id": "watch-1", "name": "RSA", "folder": "INBOX", "filters": {}}
+            ]
+        },
+    )
+    flow = EmailHAOptionsFlow()
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_get_known_entry=Mock(return_value=entry))
+    )
+    flow.handler = "entry-1"
+    flow.async_create_entry = Mock(return_value={"type": "create_entry"})
+    flow._watch_mode = "edit"  # noqa: SLF001
+    flow._watch_id = "watch-1"  # noqa: SLF001
+    flow._watch_draft = {  # noqa: SLF001
+        "id": "watch-1",
+        "name": "Renamed RSA",
+        "folder": "INBOX",
+        "filters": {},
+    }
+
+    flow._finish_email_watch()  # noqa: SLF001
+
+    edited = flow.async_create_entry.call_args.kwargs["data"]["email_watches"]
+    assert edited[0]["id"] == "watch-1"
+    assert edited[0]["name"] == "Renamed RSA"
+
+    entry.options = {"email_watches": edited}
+    flow._watch_mode = "duplicate"  # noqa: SLF001
+    flow._watch_draft = {**edited[0], "name": "Copy of Renamed RSA"}  # noqa: SLF001
+    monkeypatch.setattr(
+        "custom_components.email_ha.config_flow.uuid4",
+        Mock(return_value=SimpleNamespace(hex="watch-2")),
+    )
+    flow._finish_email_watch()  # noqa: SLF001
+
+    duplicated = flow.async_create_entry.call_args.kwargs["data"]["email_watches"]
+    assert [watch["id"] for watch in duplicated] == ["watch-1", "watch-2"]
+
+
 def test_gmail_sensor_state_reconciles_entity_registry(monkeypatch) -> None:
     """The single state screen enables and integration-disables fixed entities."""
     entry = SimpleNamespace(entry_id="entry-1", options={})
@@ -240,6 +314,7 @@ def test_custom_common_form_is_approachable_and_body_free() -> None:
     assert result["folder"] == "INBOX"
     assert result["read_state"] == "any"
     assert result["gmail_category"] == "any"
+    assert result["attachment_state"] == "any"
     assert result["more_filters"] is False
     assert "body" not in result
     assert "to" not in result
@@ -252,6 +327,9 @@ def test_custom_advanced_form_contains_progressively_disclosed_filters() -> None
 
     assert result["body"] == "booking"
     assert result["since"] == "2026-07-01"
+    assert "attachment_filename" in {
+        str(key.schema) for key in schema.schema if hasattr(key, "schema")
+    }
 
 
 def test_discovered_folder_selector_still_allows_arbitrary_folder() -> None:

@@ -6,7 +6,11 @@ from datetime import date
 
 import pytest
 
-from custom_components.email_ha.search import build_structured_search_tokens
+from custom_components.email_ha.search import (
+    build_structured_search_tokens,
+    normalize_structured_filters,
+    quote_imap_search_value,
+)
 
 
 def test_empty_structured_search_is_all() -> None:
@@ -99,3 +103,44 @@ def test_gmail_category_and_importance_use_documented_extension() -> None:
     assert build_structured_search_tokens(
         {"gmail_category": "primary", "important_state": "important"}
     ) == ["X-GM-RAW", '"category:primary is:important"']
+
+
+@pytest.mark.parametrize(
+    ("state", "term"),
+    [("has_attachment", "has:attachment"), ("no_attachment", "-has:attachment")],
+)
+def test_attachment_state_uses_safe_gmail_search(state: str, term: str) -> None:
+    """Attachment presence is expressed through Gmail's structured raw search."""
+    assert build_structured_search_tokens({"attachment_state": state}) == [
+        "X-GM-RAW",
+        f'"{term}"',
+    ]
+
+
+def test_attachment_filename_combines_with_other_filters_and_escapes() -> None:
+    """Filename criteria stay safely quoted and AND-combine with normal fields."""
+    tokens = build_structured_search_tokens(
+        {
+            "from": "rsa.ie",
+            "attachment_state": "has_attachment",
+            "attachment_filename": 'invoice "final".pdf',
+        }
+    )
+
+    assert tokens[:3] == ["FROM", '"rsa.ie"', "X-GM-RAW"]
+    assert tokens[3] == quote_imap_search_value(
+        'has:attachment filename:"invoice \\"final\\".pdf"', "Gmail filter"
+    )
+
+
+def test_invalid_attachment_state_is_rejected() -> None:
+    """Only the friendly, documented attachment states are accepted."""
+    with pytest.raises(ValueError, match="attachment_state"):
+        normalize_structured_filters({"attachment_state": "maybe"})
+
+
+@pytest.mark.parametrize("value", ["bad\rname", "bad\nname", "bad\x00name"])
+def test_attachment_filename_rejects_command_controls(value: str) -> None:
+    """Filename input retains the shared IMAP injection protections."""
+    with pytest.raises(ValueError, match="control characters"):
+        build_structured_search_tokens({"attachment_filename": value})

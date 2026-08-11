@@ -43,6 +43,11 @@ class SearchCountData:
 
     count: int | None = None
     newest_uid: str | None = None
+    newest_subject: str | None = None
+    newest_sender_name: str | None = None
+    newest_sender_address: str | None = None
+    newest_date: str | None = None
+    last_new_match: str | None = None
 
 
 @dataclass(slots=True)
@@ -56,6 +61,7 @@ class EmailData:
     gmail_counts: dict[str, SearchCountData] = field(default_factory=dict)
     custom_counts: dict[str, SearchCountData] = field(default_factory=dict)
     new_emails: list[dict[str, Any]] = field(default_factory=list)
+    watch_matches: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
 
     @property
     def latest_email(self) -> dict[str, Any] | None:
@@ -78,6 +84,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         folder: str,
         enabled_gmail_entities: set[str] | None = None,
         custom_sensors: list[dict[str, Any]] | None = None,
+        email_watches: list[dict[str, Any]] | None = None,
     ) -> None:
         self.oauth_session = oauth_session
         self._email = email_address
@@ -86,6 +93,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         self._folder = folder
         self.enabled_gmail_entities = enabled_gmail_entities or set()
         self.custom_sensors = custom_sensors or []
+        self.email_watches = email_watches or []
         self.last_success_time: datetime | None = None
         self._idle_task: asyncio.Task[None] | None = None
         self._cached_folders: list[str] = []
@@ -95,6 +103,9 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         self._last_seen_uid = 0
         self._update_lock = asyncio.Lock()
         self._new_email_listeners: set[Callable[[dict[str, Any]], None]] = set()
+        self._watch_listeners: dict[str, set[Callable[[dict[str, Any]], None]]] = {}
+        self._folder_uid_state: dict[str, tuple[int | None, int]] = {}
+        self._custom_last_new_match: dict[str, str] = {}
 
         super().__init__(
             hass,
@@ -119,6 +130,22 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         @callback
         def remove_listener() -> None:
             self._new_email_listeners.discard(listener)
+
+        return remove_listener
+
+    @callback
+    def async_add_watch_listener(
+        self, watch_id: str, listener: Callable[[dict[str, Any]], None]
+    ) -> Callable[[], None]:
+        """Register a listener for one persistent Email watch ID."""
+        listeners = self._watch_listeners.setdefault(watch_id, set())
+        listeners.add(listener)
+
+        @callback
+        def remove_listener() -> None:
+            listeners.discard(listener)
+            if not listeners:
+                self._watch_listeners.pop(watch_id, None)
 
         return remove_listener
 
@@ -179,6 +206,93 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             )
         return messages
 
+    async def _async_detect_folder_new_emails(
+        self,
+        client: ImapClient,
+        folder: str,
+        status: dict[str, int],
+        *,
+        fetch_messages: bool,
+    ) -> list[dict[str, Any]]:
+        """Detect new mail in an additional tracked folder without replaying history."""
+        uid_validity = status.get("uidvalidity")
+        highest_uid = max(0, status.get("uidnext", 1) - 1)
+        previous = self._folder_uid_state.get(folder)
+        if previous is None or previous[0] != uid_validity:
+            self._folder_uid_state[folder] = (uid_validity, highest_uid)
+            return []
+        last_seen = previous[1]
+        if highest_uid <= last_seen:
+            return []
+        self._folder_uid_state[folder] = (uid_validity, highest_uid)
+        if not fetch_messages:
+            return []
+        messages, match_count = await client.get_new_emails(
+            folder, last_seen, MAX_NEW_EMAIL_EVENTS
+        )
+        if match_count > MAX_NEW_EMAIL_EVENTS:
+            _LOGGER.warning(
+                "Received %d messages between updates for %s; checking the newest %d",
+                match_count,
+                self._email,
+                MAX_NEW_EMAIL_EVENTS,
+            )
+        return messages
+
+    @staticmethod
+    def _count_data(
+        count: int,
+        newest_uid: str | None,
+        message: dict[str, Any] | None,
+        last: str | None,
+    ) -> SearchCountData:
+        """Build privacy-conscious newest-message state."""
+        sender = (message or {}).get("sender") or {}
+        return SearchCountData(
+            count=count,
+            newest_uid=newest_uid,
+            newest_subject=(message or {}).get("subject"),
+            newest_sender_name=sender.get("name"),
+            newest_sender_address=sender.get("address"),
+            newest_date=(message or {}).get("date"),
+            last_new_match=last,
+        )
+
+    async def _async_match_new_messages(
+        self,
+        client: ImapClient,
+        arrivals: dict[str, list[dict[str, Any]]],
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """Match definitions only against bounded, genuinely new UIDs."""
+        watch_matches: list[tuple[str, dict[str, Any]]] = []
+        observed_at = datetime.now(timezone.utc).isoformat()
+        for definition, is_watch in (
+            *((sensor, False) for sensor in self.custom_sensors),
+            *((watch, True) for watch in self.email_watches),
+        ):
+            definition_id = str(definition.get("id", ""))
+            folder = str(definition.get("folder", DEFAULT_FOLDER))
+            if not definition_id or not arrivals.get(folder):
+                continue
+            try:
+                tokens = build_structured_search_tokens(definition.get("filters", {}))
+                for message in arrivals[folder]:
+                    uid = str(message.get("uid", ""))
+                    if not await client.uid_matches(folder, uid, tokens):
+                        continue
+                    if is_watch:
+                        watch_matches.append((definition_id, message))
+                    else:
+                        self._custom_last_new_match[definition_id] = observed_at
+            except (ImapClientError, ValueError) as err:
+                _LOGGER.warning(
+                    "Unable to match filtered definition %s for %s: %s",
+                    definition_id,
+                    self._email,
+                    type(err).__name__,
+                )
+        return watch_matches
+
     async def _async_fetch_data(self, client: ImapClient) -> EmailData:
         """Fetch all enabled state through one connected client."""
         monitored_status = await client.get_folder_status(self._folder)
@@ -204,6 +318,40 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             count, newest_uid = await client.count_emails(DEFAULT_FOLDER, tokens)
             gmail_counts[definition.key] = SearchCountData(count, newest_uid)
 
+        tracked_definitions = [*self.custom_sensors, *self.email_watches]
+        tracked_folders = {
+            str(item.get("folder", DEFAULT_FOLDER)) for item in tracked_definitions
+        }
+        folder_statuses = {self._folder: monitored_status}
+        for folder in tracked_folders - {self._folder}:
+            folder_statuses[folder] = await client.get_folder_status(folder)
+
+        arrivals: dict[str, list[dict[str, Any]]] = {}
+        for folder, status in folder_statuses.items():
+            needs_filtered_messages = folder in tracked_folders
+            if folder == self._folder:
+                # Maintain the established generic-event baseline for compatibility.
+                generic_messages = await self._async_detect_new_emails(client, status)
+                if (
+                    needs_filtered_messages
+                    and "new_email" not in self.enabled_gmail_entities
+                ):
+                    arrivals[folder] = await self._async_detect_folder_new_emails(
+                        client, folder, status, fetch_messages=True
+                    )
+                else:
+                    arrivals[folder] = generic_messages
+                    self._folder_uid_state[folder] = (
+                        status.get("uidvalidity"),
+                        max(0, status.get("uidnext", 1) - 1),
+                    )
+            else:
+                arrivals[folder] = await self._async_detect_folder_new_emails(
+                    client, folder, status, fetch_messages=needs_filtered_messages
+                )
+
+        watch_matches = await self._async_match_new_messages(client, arrivals)
+
         custom_counts: dict[str, SearchCountData] = {}
         for sensor in self.custom_sensors:
             sensor_id = str(sensor.get("id", ""))
@@ -214,6 +362,13 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                 count, newest_uid = await client.count_emails(
                     str(sensor.get("folder", DEFAULT_FOLDER)), tokens
                 )
+                newest = (
+                    await client.get_email_metadata(
+                        str(sensor.get("folder", DEFAULT_FOLDER)), newest_uid
+                    )
+                    if newest_uid
+                    else None
+                )
             except (ImapClientError, ValueError) as err:
                 _LOGGER.warning(
                     "Unable to update custom sensor %s for %s: %s",
@@ -223,9 +378,14 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                 )
                 custom_counts[sensor_id] = SearchCountData()
             else:
-                custom_counts[sensor_id] = SearchCountData(count, newest_uid)
+                custom_counts[sensor_id] = self._count_data(
+                    count,
+                    newest_uid,
+                    newest,
+                    self._custom_last_new_match.get(sensor_id),
+                )
 
-        new_emails = await self._async_detect_new_emails(client, monitored_status)
+        new_emails = arrivals.get(self._folder, [])
         self.last_success_time = datetime.now(timezone.utc)
         return EmailData(
             emails=emails,
@@ -235,6 +395,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             gmail_counts=gmail_counts,
             custom_counts=custom_counts,
             new_emails=new_emails,
+            watch_matches=watch_matches,
         )
 
     @callback
@@ -255,6 +416,30 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             for listener in tuple(self._new_email_listeners):
                 listener(payload)
 
+    @callback
+    def _notify_watch_matches(self, matches: list[tuple[str, dict[str, Any]]]) -> None:
+        """Deliver bounded, body-free matches to their watch EventEntities."""
+        definitions = {str(watch.get("id", "")): watch for watch in self.email_watches}
+        for watch_id, message in matches:
+            watch = definitions.get(watch_id)
+            if watch is None:
+                continue
+            sender = message.get("sender") or {}
+            payload = {
+                "account": self._email,
+                "folder": watch.get("folder", DEFAULT_FOLDER),
+                "uid": message.get("uid"),
+                "message_id": message.get("message_id"),
+                "subject": message.get("subject"),
+                "sender_name": sender.get("name", ""),
+                "sender_address": sender.get("address", ""),
+                "date": message.get("date"),
+                "watch_id": watch_id,
+                "watch_name": watch.get("name", "Email watch"),
+            }
+            for listener in tuple(self._watch_listeners.get(watch_id, ())):
+                listener(payload)
+
     async def _async_update_data(self) -> EmailData:
         """Run the internal fallback refresh used when IDLE misses an update."""
         async with self._update_lock:
@@ -271,6 +456,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                 ) from err
 
         self._notify_new_emails(data.new_emails)
+        self._notify_watch_matches(data.watch_matches)
         return data
 
     def start_idle(self) -> None:
@@ -332,6 +518,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                     data = await self._async_fetch_data(client)
                     self.async_set_updated_data(data)
                     self._notify_new_emails(data.new_emails)
+                    self._notify_watch_matches(data.watch_matches)
 
                 idle_timeout = min(
                     float(IDLE_PUSH_WAIT_TIMEOUT),

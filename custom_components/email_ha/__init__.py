@@ -27,6 +27,7 @@ from homeassistant.helpers.typing import ConfigType
 from .const import (
     CONF_CUSTOM_SENSORS,
     CONF_EMAIL,
+    CONF_EMAIL_WATCHES,
     CONF_MONITORED_FOLDER,
     DEFAULT_FOLDER,
     DEFAULT_MESSAGE_BODY_CHARS,
@@ -57,6 +58,7 @@ from .imap_client import (
     tokenize_search_criteria,
 )
 from .search import (
+    ATTACHMENT_STATES,
     GMAIL_CATEGORIES,
     IMPORTANT_STATES,
     READ_STATES,
@@ -99,6 +101,8 @@ FIND_EMAILS_SCHEMA = vol.Schema(
         vol.Optional("subject"): cv.string,
         vol.Optional("body"): cv.string,
         vol.Optional("text"): cv.string,
+        vol.Optional("attachment_state", default="any"): vol.In(ATTACHMENT_STATES),
+        vol.Optional("attachment_filename"): cv.string,
         vol.Optional("read_state", default="any"): vol.In(READ_STATES),
         vol.Optional("starred_state", default="any"): vol.In(STARRED_STATES),
         vol.Optional("important_state", default="any"): vol.In(IMPORTANT_STATES),
@@ -155,6 +159,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         folder=entry.options.get(CONF_MONITORED_FOLDER, DEFAULT_FOLDER),
         enabled_gmail_entities=enabled_entities_for_entry(entry),
         custom_sensors=entry.options.get(CONF_CUSTOM_SENSORS, []),
+        email_watches=entry.options.get(CONF_EMAIL_WATCHES, []),
     )
     try:
         await coordinator.async_config_entry_first_refresh()

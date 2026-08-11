@@ -89,6 +89,19 @@ find_emails:
               value: social
             - label: Forums
               value: forums
+    attachment_state:
+      name: Attachment
+      description: Optionally require an attachment or require no attachment.
+      default: any
+      selector:
+        select:
+          options:
+            - label: Any
+              value: any
+            - label: Has attachment
+              value: has_attachment
+            - label: No attachment
+              value: no_attachment
     more_filters:
       collapsed: true
       fields:
@@ -114,6 +127,12 @@ find_emails:
           name: Any text contains
           description: Search message headers and body text on Gmail's server.
           example: Dublin
+          selector:
+            text: {}
+        attachment_filename:
+          name: Attachment filename contains
+          description: Match attachment filenames using Gmail's server-side search without downloading attachments.
+          example: pdf
           selector:
             text: {}
         since:
