@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from custom_components.email_ha.coordinator import EmailDataUpdateCoordinator
+from custom_components.email_ha.imap_client import ImapFolderError
 
 
 def _coordinator(account: str = "user@example.com") -> EmailDataUpdateCoordinator:
@@ -24,6 +25,9 @@ def _coordinator(account: str = "user@example.com") -> EmailDataUpdateCoordinato
     coordinator._watch_listeners = {}  # noqa: SLF001
     coordinator._folder_uid_state = {}  # noqa: SLF001
     coordinator._custom_last_new_match = {}  # noqa: SLF001
+    coordinator._cached_folders = ["INBOX"]  # noqa: SLF001
+    coordinator._folders_fetched_at = float("inf")  # noqa: SLF001
+    coordinator.last_success_time = None
     return coordinator
 
 
@@ -211,7 +215,7 @@ async def test_new_email_can_match_multiple_watches_and_custom_sensor() -> None:
         }
     ]
     client = AsyncMock()
-    client.uid_matches.return_value = True
+    client.matching_uids.return_value = {"44", "45"}
 
     matches = await coordinator._async_match_new_messages(  # noqa: SLF001
         client, {"INBOX": [_message("44"), _message("45")]}
@@ -224,7 +228,10 @@ async def test_new_email_can_match_multiple_watches_and_custom_sensor() -> None:
         ("pdf", "45"),
     ]
     assert coordinator._custom_last_new_match["rsa-count"]  # noqa: SLF001
-    assert client.uid_matches.await_count == 6
+    assert client.matching_uids.await_count == 3
+    assert all(
+        call.args[1] == ["44", "45"] for call in client.matching_uids.await_args_list
+    )
 
 
 @pytest.mark.asyncio
@@ -238,7 +245,7 @@ async def test_nonmatching_arrival_updates_neither_watch_nor_sensor() -> None:
         {"id": "rsa-count", "folder": "INBOX", "filters": {"from": "rsa.ie"}}
     ]
     client = AsyncMock()
-    client.uid_matches.return_value = False
+    client.matching_uids.return_value = set()
 
     matches = await coordinator._async_match_new_messages(  # noqa: SLF001
         client, {"INBOX": [_message("44")]}
@@ -246,6 +253,162 @@ async def test_nonmatching_arrival_updates_neither_watch_nor_sensor() -> None:
 
     assert matches == []
     assert coordinator._custom_last_new_match == {}  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_matching_results_map_only_to_arrival_metadata() -> None:
+    """A server response cannot introduce a historical UID outside the arrival set."""
+    coordinator = _coordinator()
+    coordinator.email_watches = [
+        {"id": "rsa", "folder": "INBOX", "filters": {"from": "rsa.ie"}}
+    ]
+    client = AsyncMock()
+    client.matching_uids.return_value = {"45", "999"}
+
+    matches = await coordinator._async_match_new_messages(  # noqa: SLF001
+        client, {"INBOX": [_message("44"), _message("45")]}
+    )
+
+    assert [(watch_id, message["uid"]) for watch_id, message in matches] == [
+        ("rsa", "45")
+    ]
+    client.matching_uids.assert_awaited_once_with(
+        "INBOX", ["44", "45"], ["FROM", '"rsa.ie"']
+    )
+
+
+@pytest.mark.asyncio
+async def test_inaccessible_secondary_watch_folder_is_isolated(caplog) -> None:
+    """A missing watch folder does not fail healthy account state or emit a match."""
+    coordinator = _coordinator()
+    coordinator.email_watches = [
+        {
+            "id": "missing",
+            "name": "Missing",
+            "folder": "Deleted",
+            "filters": {"from": "private@example.com"},
+        }
+    ]
+    coordinator._event_baseline_ready = True  # noqa: SLF001
+    coordinator._uid_validity = 7  # noqa: SLF001
+    coordinator._last_seen_uid = 9  # noqa: SLF001
+    client = AsyncMock()
+
+    async def folder_status(folder: str) -> dict[str, int]:
+        if folder == "Deleted":
+            raise ImapFolderError("not accessible")
+        return {"messages": 4, "unseen": 2, "uidvalidity": 7, "uidnext": 11}
+
+    client.get_folder_status.side_effect = folder_status
+    client.get_new_emails.return_value = ([_message("10")], 1)
+
+    with caplog.at_level("WARNING"):
+        data = await coordinator._async_fetch_data(client)  # noqa: SLF001
+
+    assert data.inbox_total == 4
+    assert [message["uid"] for message in data.new_emails] == ["10"]
+    assert data.watch_matches == []
+    client.matching_uids.assert_not_awaited()
+    assert "Deleted" in caplog.text
+    assert "user@example.com" in caplog.text
+    assert "private@example.com" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_inaccessible_custom_folder_does_not_block_healthy_sensor() -> None:
+    """Per-sensor failure remains isolated while another folder still updates."""
+    coordinator = _coordinator()
+    coordinator.custom_sensors = [
+        {"id": "missing", "folder": "Deleted", "filters": {}},
+        {"id": "healthy", "folder": "Receipts", "filters": {}},
+    ]
+    client = AsyncMock()
+
+    async def folder_status(folder: str) -> dict[str, int]:
+        if folder == "Deleted":
+            raise ImapFolderError("not accessible")
+        return {"messages": 4, "unseen": 2, "uidvalidity": 7, "uidnext": 11}
+
+    async def count_emails(folder: str, _tokens: list[str]):
+        if folder == "Deleted":
+            raise ImapFolderError("not accessible")
+        return 3, "10"
+
+    client.get_folder_status.side_effect = folder_status
+    client.count_emails.side_effect = count_emails
+    client.get_email_metadata.return_value = _message("10")
+
+    data = await coordinator._async_fetch_data(client)  # noqa: SLF001
+
+    assert data.custom_counts["missing"].count is None
+    assert data.custom_counts["healthy"].count == 3
+    assert data.custom_counts["healthy"].newest_uid == "10"
+
+
+@pytest.mark.asyncio
+async def test_healthy_watch_folder_continues_when_another_is_unavailable() -> None:
+    """A healthy secondary folder still detects and matches arrivals."""
+    coordinator = _coordinator()
+    coordinator.email_watches = [
+        {"id": "missing", "folder": "Deleted", "filters": {}},
+        {"id": "healthy", "folder": "Receipts", "filters": {}},
+    ]
+    coordinator._folder_uid_state["Receipts"] = (8, 40)  # noqa: SLF001
+    client = AsyncMock()
+
+    async def folder_status(folder: str) -> dict[str, int]:
+        if folder == "Deleted":
+            raise ImapFolderError("not accessible")
+        if folder == "Receipts":
+            return {"messages": 1, "unseen": 1, "uidvalidity": 8, "uidnext": 42}
+        return {"messages": 4, "unseen": 2, "uidvalidity": 7, "uidnext": 11}
+
+    client.get_folder_status.side_effect = folder_status
+    client.get_new_emails.return_value = ([_message("41")], 1)
+    client.matching_uids.return_value = {"41"}
+
+    data = await coordinator._async_fetch_data(client)  # noqa: SLF001
+
+    assert [(watch_id, message["uid"]) for watch_id, message in data.watch_matches] == [
+        ("healthy", "41")
+    ]
+    client.matching_uids.assert_awaited_once_with("Receipts", ["41"], ["ALL"])
+
+
+@pytest.mark.asyncio
+async def test_main_monitored_folder_failure_is_not_swallowed() -> None:
+    """The primary monitored folder retains the coordinator's failure semantics."""
+    coordinator = _coordinator()
+    client = AsyncMock()
+    client.get_folder_status.side_effect = ImapFolderError("not accessible")
+
+    with pytest.raises(ImapFolderError):
+        await coordinator._async_fetch_data(client)  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_newest_metadata_is_deduplicated_per_refresh() -> None:
+    """Sensors sharing one folder/UID reuse the same bounded header fetch."""
+    coordinator = _coordinator()
+    coordinator.custom_sensors = [
+        {"id": "one", "folder": "INBOX", "filters": {"from": "one"}},
+        {"id": "two", "folder": "INBOX", "filters": {"from": "two"}},
+    ]
+    client = AsyncMock()
+    client.get_folder_status.return_value = {
+        "messages": 1,
+        "unseen": 1,
+        "uidvalidity": 7,
+        "uidnext": 56,
+    }
+    client.count_emails.return_value = (1, "55")
+    client.get_email_metadata.return_value = _message("55")
+
+    data = await coordinator._async_fetch_data(client)  # noqa: SLF001
+
+    assert data.custom_counts["one"].newest_uid == "55"
+    assert data.custom_counts["two"].newest_uid == "55"
+    client.get_email_metadata.assert_awaited_once_with("INBOX", "55")
 
 
 def test_watch_payload_is_body_free_and_account_scoped() -> None:
@@ -257,14 +420,37 @@ def test_watch_payload_is_body_free_and_account_scoped() -> None:
     received: list[dict] = []
     coordinator.async_add_watch_listener("rsa", received.append)
 
-    coordinator._notify_watch_matches([("rsa", _message("44"))])  # noqa: SLF001
+    coordinator._notify_watch_matches(  # noqa: SLF001
+        [("rsa", _message("44")), ("rsa", _message("45"))]
+    )
 
     assert received[0]["account"] == "user@example.com"
     assert received[0]["watch_id"] == "rsa"
     assert received[0]["watch_name"] == "RSA emails"
     assert received[0]["uid"] == "44"
+    assert [event["uid"] for event in received] == ["44", "45"]
     assert "plain_text_body" not in received[0]
     assert "body" not in received[0]
+
+
+def test_one_arrival_can_notify_multiple_watch_entities() -> None:
+    """Each matching watch receives its own event for the same new message."""
+    coordinator = _coordinator()
+    coordinator.email_watches = [
+        {"id": "sender", "name": "Sender", "folder": "INBOX"},
+        {"id": "pdf", "name": "PDF", "folder": "INBOX"},
+    ]
+    sender_events: list[dict] = []
+    pdf_events: list[dict] = []
+    coordinator.async_add_watch_listener("sender", sender_events.append)
+    coordinator.async_add_watch_listener("pdf", pdf_events.append)
+
+    coordinator._notify_watch_matches(  # noqa: SLF001
+        [("sender", _message("44")), ("pdf", _message("44"))]
+    )
+
+    assert [event["uid"] for event in sender_events] == ["44"]
+    assert [event["uid"] for event in pdf_events] == ["44"]
 
 
 def test_watch_listeners_are_isolated_between_accounts() -> None:

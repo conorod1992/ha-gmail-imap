@@ -276,9 +276,13 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                 continue
             try:
                 tokens = build_structured_search_tokens(definition.get("filters", {}))
+                matching_uids = await client.matching_uids(
+                    folder,
+                    [str(message.get("uid", "")) for message in arrivals[folder]],
+                    tokens,
+                )
                 for message in arrivals[folder]:
-                    uid = str(message.get("uid", ""))
-                    if not await client.uid_matches(folder, uid, tokens):
+                    if str(message.get("uid", "")) not in matching_uids:
                         continue
                     if is_watch:
                         watch_matches.append((definition_id, message))
@@ -292,6 +296,21 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                     type(err).__name__,
                 )
         return watch_matches
+
+    async def _async_secondary_folder_status(
+        self, client: ImapClient, folder: str
+    ) -> dict[str, int] | None:
+        """Return secondary folder status while isolating configured-folder errors."""
+        try:
+            return await client.get_folder_status(folder)
+        except (ImapClientError, ValueError) as err:
+            _LOGGER.warning(
+                "Unable to query tracked folder %s for %s: %s",
+                folder,
+                self._email,
+                type(err).__name__,
+            )
+            return None
 
     async def _async_fetch_data(self, client: ImapClient) -> EmailData:
         """Fetch all enabled state through one connected client."""
@@ -324,7 +343,8 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         }
         folder_statuses = {self._folder: monitored_status}
         for folder in tracked_folders - {self._folder}:
-            folder_statuses[folder] = await client.get_folder_status(folder)
+            if status := await self._async_secondary_folder_status(client, folder):
+                folder_statuses[folder] = status
 
         arrivals: dict[str, list[dict[str, Any]]] = {}
         for folder, status in folder_statuses.items():
@@ -353,22 +373,23 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         watch_matches = await self._async_match_new_messages(client, arrivals)
 
         custom_counts: dict[str, SearchCountData] = {}
+        newest_metadata: dict[tuple[str, str], dict[str, Any] | None] = {}
         for sensor in self.custom_sensors:
             sensor_id = str(sensor.get("id", ""))
             if not sensor_id:
                 continue
             try:
                 tokens = build_structured_search_tokens(sensor.get("filters", {}))
-                count, newest_uid = await client.count_emails(
-                    str(sensor.get("folder", DEFAULT_FOLDER)), tokens
-                )
-                newest = (
-                    await client.get_email_metadata(
-                        str(sensor.get("folder", DEFAULT_FOLDER)), newest_uid
-                    )
-                    if newest_uid
-                    else None
-                )
+                folder = str(sensor.get("folder", DEFAULT_FOLDER))
+                count, newest_uid = await client.count_emails(folder, tokens)
+                newest = None
+                if newest_uid:
+                    cache_key = (folder, newest_uid)
+                    if cache_key not in newest_metadata:
+                        newest_metadata[cache_key] = await client.get_email_metadata(
+                            folder, newest_uid
+                        )
+                    newest = newest_metadata[cache_key]
             except (ImapClientError, ValueError) as err:
                 _LOGGER.warning(
                     "Unable to update custom sensor %s for %s: %s",

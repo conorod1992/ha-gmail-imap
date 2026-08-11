@@ -156,6 +156,51 @@ async def test_uid_match_is_bounded_to_one_new_message() -> None:
 
 
 @pytest.mark.asyncio
+async def test_uid_set_matching_uses_one_valid_sequence_set_search() -> None:
+    """Several arrivals are constrained by one comma-separated UID sequence set."""
+    protocol = AsyncMock()
+    protocol.examine.return_value = _Response("OK", [b"3"])
+    protocol.uid_search.return_value = _Response("OK", [b"44 46 999"])
+    client = ImapClient("imap.gmail.com")
+    client._client = protocol  # noqa: SLF001
+
+    matches = await client.matching_uids(
+        "INBOX", ["44", "45", "46"], ["FROM", '"rsa.ie"']
+    )
+
+    assert matches == {"44", "46"}
+    protocol.uid_search.assert_awaited_once_with(
+        "UID", "44,45,46", "FROM", '"rsa.ie"', charset=None
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("uids", [["44", "bad"], ["0"], ["-1"]])
+async def test_uid_set_matching_rejects_invalid_uids(uids: list[str]) -> None:
+    """Only positive numeric UIDs can enter the generated IMAP sequence set."""
+    protocol = AsyncMock()
+    client = ImapClient("imap.gmail.com")
+    client._client = protocol  # noqa: SLF001
+
+    with pytest.raises(ValueError, match="positive integers"):
+        await client.matching_uids("INBOX", uids, ["ALL"])
+
+    protocol.examine.assert_not_awaited()
+    protocol.uid_search.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_empty_uid_set_performs_no_search() -> None:
+    """No arrivals means no IMAP command."""
+    protocol = AsyncMock()
+    client = ImapClient("imap.gmail.com")
+    client._client = protocol  # noqa: SLF001
+
+    assert await client.matching_uids("INBOX", [], ["ALL"]) == set()
+    protocol.uid_search.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_folder_control_characters_are_rejected() -> None:
     """Folder input cannot inject another IMAP command."""
     protocol = AsyncMock()
