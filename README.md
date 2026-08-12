@@ -12,6 +12,7 @@ understand IMAP.
 - Latest email metadata
 - a New email event entity for UI-built automations
 - custom server-side email count sensors
+- per-filter Email watch event entities
 - a friendly `email_ha.find_emails` action
 - explicit, bounded email-body retrieval
 - an advanced raw IMAP search action
@@ -131,9 +132,9 @@ Choose **Configure > Custom email sensors** to view, add, edit, duplicate, or
 delete count sensors. The management list shows enough of each private filter
 to identify it; entity attributes expose only filter field names, not values.
 
-The first form contains common filters. Turn on **Add more filters** for To, CC,
-body text, any text, and date filters. Blank fields are ignored and all filled
-conditions must match.
+The first form contains common filters, including attachment presence. Turn on
+**Add more filters** for To, CC, body text, any text, attachment filename, and
+date filters. Blank fields are ignored and all filled conditions must match.
 
 Examples:
 
@@ -143,12 +144,82 @@ Examples:
 | Bookings | Inbox | Subject contains `booking`; Read state `Unread` |
 | Starred Primary | Inbox | Gmail category `Primary`; Starred state `Starred` |
 
-Gmail performs custom sensor searches server-side. Email HA retrieves only the
-matching UID count and newest matching UID; it does not download bodies to
-calculate a count. Up to 20 custom sensors can be configured per account.
+Gmail performs custom sensor searches server-side. Email HA retrieves the
+matching UID count and bounded header metadata for the newest match; it does
+not download bodies to calculate a count. Up to 20 custom sensors can be
+configured per account.
+
+Custom sensor attributes include `newest_matching_uid`, subject, sender name,
+sender address, and date. These describe current mailbox state, including mail
+that existed before Home Assistant started. `last_new_match` is different: it
+is set only when Email HA observes a genuinely new arrival that matches the
+sensor. It is runtime observation state and resets when the integration is
+reloaded. Filter values remain private; attributes list filter field names
+only.
 
 Discovered folders are offered in the folder selector. An exact folder name
 can still be entered for advanced or localised Gmail folder layouts.
+
+## Email watches
+
+Choose **Configure > Email watches** to add, edit, duplicate, or delete an
+event stream for matching new mail. A custom sensor answers "how many messages
+match now?" An Email watch answers "did a matching message just arrive?" Each
+watch has its own discoverable EventEntity and keeps the same entity identity
+when renamed. Up to 20 watches can be configured per account.
+
+Watch event type `new_matching_email` includes account, folder, UID,
+Message-ID, subject, sender name/address, date, watch ID, and watch name when
+available. It never contains a body or filter values. Matching is constrained
+to the newly detected folder-specific UID; attachments are never downloaded.
+
+Watch baselines use Gmail UIDVALIDITY and UIDNEXT. Historical matches are not
+fired at startup, after an integration reload, or when a watch is created.
+Changing an old message or changing a historical count is not a new arrival.
+
+### RSA email watch
+
+Create a watch named **RSA emails** with **From contains** `rsa.ie` and
+**Subject contains** `check test`, then select its event entity in an
+automation:
+
+```yaml
+triggers:
+  - trigger: event.received
+    target:
+      entity_id: event.gmail_you_example_com_rsa_emails
+    options:
+      event_type:
+        - new_matching_email
+actions:
+  - action: notify.mobile_app_your_phone
+    data:
+      title: RSA email arrived
+      message: "{{ trigger.to_state.attributes.subject }}"
+```
+
+### Booking watch without body retrieval
+
+A **New booking** watch can use **Subject contains** `booking` and **Attachment
+filename contains** `pdf`. The automation reacts using safe event metadata and
+does not call `get_email_contents`:
+
+```yaml
+triggers:
+  - trigger: event.received
+    target:
+      entity_id: event.gmail_you_example_com_new_booking
+    options:
+      event_type:
+        - new_matching_email
+actions:
+  - action: persistent_notification.create
+    data:
+      title: New booking email
+      message: >-
+        {{ trigger.to_state.attributes.sender_name }} sent
+        {{ trigger.to_state.attributes.subject }}.
+```
 
 ## Automations
 
@@ -260,10 +331,37 @@ actions:
 Subject, Body, Any text, read, starred, importance, category, and date fields.
 Blank filters are ignored; filled filters combine with AND.
 
+Attachment filters use Gmail's server-side search. **Attachment** accepts Any,
+Has attachment, or No attachment. **Attachment filename contains** safely
+builds Gmail's `filename:` criterion; Gmail decides substring/token matching,
+so it is not a local MIME filename parser.
+
+Find messages with any attachment:
+
+```yaml
+action: email_ha.find_emails
+data:
+  from: rsa.ie
+  attachment_state: has_attachment
+response_variable: attached_mail
+```
+
+Find messages whose attachment filename matches `pdf`:
+
+```yaml
+action: email_ha.find_emails
+data:
+  attachment_state: has_attachment
+  attachment_filename: pdf
+response_variable: pdf_mail
+```
+
 Searches return newest matches first and include metadata only by default. Set
 `include_body: true` only when the automation needs bounded readable content.
 The body limit is 1-20,000 characters per message and result count is limited
-to 1-25.
+to 1-25. When MIME content is explicitly retrieved, results also include
+`has_attachments`, `attachment_count`, and bounded filename/content-type
+metadata; attachment payloads are never exposed.
 
 ### Get email contents
 
@@ -292,8 +390,9 @@ documented `X-GM-RAW` extension.
 ## Multiple accounts
 
 Add the integration once for each Gmail address. Accounts can reuse the same
-Google OAuth client. Every account has its own device, coordinator, UID
-baseline, and New email entity.
+Google OAuth client. Every account has its own device, coordinator, folder UID
+baselines, New email entity, and Email watch entities. Events never cross
+accounts.
 
 Actions automatically use the only loaded account. When more than one account
 is loaded, select **Account** in the action UI so no arbitrary account is used.

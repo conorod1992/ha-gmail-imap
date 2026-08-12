@@ -116,6 +116,35 @@ async def test_find_emails_body_opt_in_and_limit_are_propagated(monkeypatch) -> 
 
 
 @pytest.mark.asyncio
+async def test_find_emails_supports_attachment_filters(monkeypatch) -> None:
+    """The public friendly action uses the same attachment-aware filter model."""
+    hass = _configured_hass()
+    search = AsyncMock(return_value=[])
+    monkeypatch.setattr("custom_components.email_ha._search_structured", search)
+    handler, schema = hass.services.registered[(DOMAIN, SERVICE_FIND_EMAILS)]
+
+    response = await handler(
+        SimpleNamespace(
+            data=schema(
+                {
+                    "attachment_state": "has_attachment",
+                    "attachment_filename": "pdf",
+                }
+            )
+        )
+    )
+
+    assert search.await_args.kwargs["tokens"] == [
+        "X-GM-RAW",
+        '"has:attachment filename:\\"pdf\\""',
+    ]
+    assert response["filters"] == {
+        "attachment_filename": "pdf",
+        "attachment_state": "has_attachment",
+    }
+
+
+@pytest.mark.asyncio
 async def test_advanced_search_propagates_raw_query(monkeypatch) -> None:
     """Raw IMAP remains available through one clearly advanced action."""
     hass = _configured_hass()

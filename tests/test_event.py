@@ -6,8 +6,12 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from custom_components.email_ha.const import EVENT_TYPE_NEW_EMAIL, PLATFORMS
-from custom_components.email_ha.event import NewEmailEventEntity
+from custom_components.email_ha.const import (
+    EVENT_TYPE_NEW_EMAIL,
+    EVENT_TYPE_NEW_MATCHING_EMAIL,
+    PLATFORMS,
+)
+from custom_components.email_ha.event import EmailWatchEventEntity, NewEmailEventEntity
 
 
 def _entity() -> NewEmailEventEntity:
@@ -48,3 +52,33 @@ def test_event_entity_publishes_coordinator_payload() -> None:
         EVENT_TYPE_NEW_EMAIL, event_data
     )
     entity.async_write_ha_state.assert_called_once()  # type: ignore[attr-defined]
+
+
+def test_watch_rename_preserves_identity_and_emits_bounded_payload() -> None:
+    """A watch UUID, not its mutable display name, determines entity identity."""
+    entry = SimpleNamespace(
+        entry_id="entry-1", data={"email": "user@example.com"}, options={}
+    )
+    coordinator = SimpleNamespace(async_add_watch_listener=Mock())
+    entity = EmailWatchEventEntity(
+        coordinator,
+        entry,
+        {"id": "watch-uuid", "name": "Renamed RSA", "folder": "INBOX"},
+    )
+    entity._trigger_event = Mock()  # type: ignore[method-assign]  # noqa: SLF001
+    entity.async_write_ha_state = Mock()  # type: ignore[method-assign]
+    payload = {
+        "watch_id": "watch-uuid",
+        "watch_name": "Renamed RSA",
+        "uid": "44",
+        "subject": "Check test",
+    }
+
+    entity._handle_match(payload)  # noqa: SLF001
+
+    assert entity.unique_id == "entry-1_watch_watch-uuid"
+    assert entity.name == "Renamed RSA"
+    entity._trigger_event.assert_called_once_with(  # type: ignore[attr-defined]  # noqa: SLF001
+        EVENT_TYPE_NEW_MATCHING_EMAIL, payload
+    )
+    assert "body" not in payload

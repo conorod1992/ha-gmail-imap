@@ -25,6 +25,7 @@ from homeassistant.helpers.entity_registry import RegistryEntryDisabler
 from .const import (
     CONF_CUSTOM_SENSORS,
     CONF_EMAIL,
+    CONF_EMAIL_WATCHES,
     CONF_FOLDER,
     CONF_GMAIL_ENTITIES,
     CONF_MONITORED_FOLDER,
@@ -32,6 +33,7 @@ from .const import (
     DOMAIN,
     GMAIL_SCOPES,
     MAX_CUSTOM_SENSORS,
+    MAX_EMAIL_WATCHES,
 )
 from .coordinator import coordinator_from_entry
 from .gmail import (
@@ -41,6 +43,7 @@ from .gmail import (
     enabled_entities_for_entry,
 )
 from .search import (
+    ATTACHMENT_STATES,
     GMAIL_CATEGORIES,
     IMPORTANT_STATES,
     READ_STATES,
@@ -59,8 +62,18 @@ _COMMON_FILTER_FIELDS = (
     "gmail_category",
     "important_state",
     "starred_state",
+    "attachment_state",
 )
-_ADVANCED_FILTER_FIELDS = ("to", "cc", "body", "text", "since", "before", "on")
+_ADVANCED_FILTER_FIELDS = (
+    "to",
+    "cc",
+    "body",
+    "text",
+    "attachment_filename",
+    "since",
+    "before",
+    "on",
+)
 
 
 def _select(values: tuple[str, ...], translation_key: str) -> selector.SelectSelector:
@@ -143,6 +156,9 @@ def _custom_common_schema(folders: list[str], values: dict[str, Any]) -> vol.Sch
             vol.Optional(
                 "starred_state", default=filters.get("starred_state", "any")
             ): _select(STARRED_STATES, "starred_state"),
+            vol.Optional(
+                "attachment_state", default=filters.get("attachment_state", "any")
+            ): _select(ATTACHMENT_STATES, "attachment_state"),
             vol.Optional(
                 "more_filters", default=has_advanced
             ): selector.BooleanSelector(),
@@ -324,6 +340,9 @@ class EmailHAOptionsFlow(OptionsFlow):
         self._custom_mode = ""
         self._custom_id: str | None = None
         self._custom_draft: dict[str, Any] = {}
+        self._watch_mode = ""
+        self._watch_id: str | None = None
+        self._watch_draft: dict[str, Any] = {}
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -335,6 +354,7 @@ class EmailHAOptionsFlow(OptionsFlow):
             menu_options=[
                 "gmail_sensors",
                 "custom_sensors",
+                "email_watches",
                 "advanced_account_settings",
             ],
         )
@@ -590,6 +610,181 @@ class EmailHAOptionsFlow(OptionsFlow):
             ),
             description_placeholders={
                 "name": str(self._custom_draft.get("name", "Custom sensor"))
+            },
+        )
+
+    def _email_watches(self) -> list[dict[str, Any]]:
+        """Return persisted Email watches for this account."""
+        return list(self.config_entry.options.get(CONF_EMAIL_WATCHES, []))
+
+    async def async_step_email_watches(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Manage watches using the same structured-filter UX as sensors."""
+        watches = self._email_watches()
+        if user_input is None:
+            choices = [
+                selector.SelectOptionDict(value="add", label="Add an email watch")
+            ]
+            for watch in watches:
+                summary = _custom_sensor_summary(watch)
+                watch_id = watch["id"]
+                choices.extend(
+                    selector.SelectOptionDict(
+                        value=f"{action}:{watch_id}", label=f"{label}: {summary}"
+                    )
+                    for action, label in (
+                        ("edit", "Edit"),
+                        ("duplicate", "Duplicate"),
+                        ("delete", "Delete"),
+                    )
+                )
+            return self.async_show_form(
+                step_id="email_watches",
+                data_schema=vol.Schema(
+                    {
+                        vol.Required("manage_action"): selector.SelectSelector(
+                            selector.SelectSelectorConfig(options=choices)
+                        )
+                    }
+                ),
+            )
+
+        action_value = str(user_input["manage_action"])
+        if action_value == "add":
+            if len(watches) >= MAX_EMAIL_WATCHES:
+                return self.async_abort(reason="too_many_email_watches")
+            self._watch_mode = "add"
+            self._watch_id = None
+            self._watch_draft = {}
+            return await self.async_step_email_watch_common()
+        action, watch_id = action_value.split(":", 1)
+        selected = next(
+            (watch for watch in watches if watch.get("id") == watch_id), None
+        )
+        if selected is None:
+            return self.async_abort(reason="email_watch_not_found")
+        self._watch_mode = action
+        self._watch_id = watch_id
+        self._watch_draft = deepcopy(selected)
+        if action == "duplicate":
+            self._watch_draft["name"] = f"Copy of {selected['name']}"
+        if action == "delete":
+            return await self.async_step_delete_email_watch()
+        return await self.async_step_email_watch_common()
+
+    async def async_step_email_watch_common(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Collect a watch name, folder, and common filters."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            name = str(user_input["name"]).strip()
+            try:
+                folder = validate_imap_folder(user_input[CONF_FOLDER])
+                common = normalize_structured_filters(
+                    {key: user_input.get(key) for key in _COMMON_FILTER_FIELDS}
+                )
+            except ValueError:
+                folder = ""
+                common = {}
+            if not name or not folder:
+                errors["base"] = "invalid_email_watch"
+            else:
+                existing = self._watch_draft.get("filters", {})
+                advanced = {
+                    key: existing[key]
+                    for key in _ADVANCED_FILTER_FIELDS
+                    if existing.get(key)
+                }
+                if not user_input.get("more_filters"):
+                    advanced = {}
+                self._watch_draft = {
+                    **self._watch_draft,
+                    "name": name,
+                    CONF_FOLDER: folder,
+                    "filters": {**advanced, **common},
+                }
+                if user_input.get("more_filters"):
+                    return await self.async_step_email_watch_advanced()
+                return self._finish_email_watch()
+        return self.async_show_form(
+            step_id="email_watch_common",
+            data_schema=_custom_common_schema(self._folders(), self._watch_draft),
+            errors=errors,
+        )
+
+    async def async_step_email_watch_advanced(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Collect advanced filters for an Email watch."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            common = {
+                key: value
+                for key, value in self._watch_draft.get("filters", {}).items()
+                if key in _COMMON_FILTER_FIELDS
+            }
+            try:
+                advanced = normalize_structured_filters(user_input)
+                self._watch_draft["filters"] = {**common, **advanced}
+                return self._finish_email_watch()
+            except ValueError:
+                errors["base"] = "invalid_email_watch"
+        return self.async_show_form(
+            step_id="email_watch_advanced",
+            data_schema=_custom_advanced_schema(self._watch_draft),
+            errors=errors,
+            last_step=True,
+        )
+
+    def _finish_email_watch(self) -> ConfigFlowResult:
+        """Validate and persist a watch while retaining identity on edits."""
+        try:
+            build_structured_search_tokens(self._watch_draft.get("filters", {}))
+        except ValueError:
+            return self.async_abort(reason="invalid_email_watch")
+        watches = self._email_watches()
+        if self._watch_mode == "edit":
+            watches = _upsert_custom_sensor(
+                watches,
+                self._watch_draft,
+                sensor_id=str(self._watch_id),
+                replace_id=self._watch_id,
+            )
+        else:
+            if len(watches) >= MAX_EMAIL_WATCHES:
+                return self.async_abort(reason="too_many_email_watches")
+            watches = _upsert_custom_sensor(
+                watches, self._watch_draft, sensor_id=uuid4().hex
+            )
+        return self._save_options({CONF_EMAIL_WATCHES: watches})
+
+    async def async_step_delete_email_watch(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Confirm deletion and remove the corresponding registry entity."""
+        if user_input is not None:
+            if not user_input.get("confirm"):
+                return await self.async_step_email_watches()
+            registry = er.async_get(self.hass)
+            unique_id = f"{self.config_entry.entry_id}_watch_{self._watch_id}"
+            if entity_id := registry.async_get_entity_id("event", DOMAIN, unique_id):
+                registry.async_remove(entity_id)
+            return self._save_options(
+                {
+                    CONF_EMAIL_WATCHES: _delete_custom_sensor(
+                        self._email_watches(), self._watch_id
+                    )
+                }
+            )
+        return self.async_show_form(
+            step_id="delete_email_watch",
+            data_schema=vol.Schema(
+                {vol.Required("confirm", default=False): selector.BooleanSelector()}
+            ),
+            description_placeholders={
+                "name": str(self._watch_draft.get("name", "Email watch"))
             },
         )
 

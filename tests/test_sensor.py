@@ -126,7 +126,21 @@ def test_mailbox_folders_is_disabled_by_default() -> None:
 def test_custom_sensor_hides_private_filter_values() -> None:
     """Entity attributes identify filter types but not owner-entered values."""
     sensor = CustomEmailCountSensor(
-        _coordinator(EmailData(custom_counts={"custom-1": SearchCountData(2, "99")})),
+        _coordinator(
+            EmailData(
+                custom_counts={
+                    "custom-1": SearchCountData(
+                        2,
+                        "99",
+                        "RSA renewal",
+                        "RSA",
+                        "sender@example.com",
+                        "2026-07-28T10:00:00+00:00",
+                        "2026-07-28T10:01:00+00:00",
+                    )
+                }
+            )
+        ),
         _entry(),
         {
             "id": "custom-1",
@@ -142,5 +156,10 @@ def test_custom_sensor_hides_private_filter_values() -> None:
         "folder": "INBOX",
         "filter_types": ["from", "read_state"],
         "newest_matching_uid": "99",
+        "newest_matching_subject": "RSA renewal",
+        "newest_matching_sender_name": "RSA",
+        "newest_matching_sender_address": "sender@example.com",
+        "newest_matching_date": "2026-07-28T10:00:00+00:00",
+        "last_new_match": "2026-07-28T10:01:00+00:00",
     }
     assert "rsa.ie" not in str(sensor.extra_state_attributes)

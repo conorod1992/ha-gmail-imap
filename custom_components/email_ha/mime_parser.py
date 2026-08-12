@@ -233,6 +233,7 @@ def parse_email_bytes(
         "folder": folder,
         "preview": re.sub(r"\s+", " ", body)[:PREVIEW_CHARS],
         "has_attachments": bool(attachments),
+        "attachment_count": len(attachments),
         "attachments": attachments,
     }
     if include_body:

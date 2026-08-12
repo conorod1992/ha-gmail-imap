@@ -192,4 +192,13 @@ class CustomEmailCountSensor(_BaseEmailSensor):
             ATTR_FOLDER: self._sensor.get(CONF_FOLDER, DEFAULT_FOLDER),
             "filter_types": sorted(filters),
             "newest_matching_uid": result.newest_uid if result else None,
+            "newest_matching_subject": result.newest_subject if result else None,
+            "newest_matching_sender_name": (
+                result.newest_sender_name if result else None
+            ),
+            "newest_matching_sender_address": (
+                result.newest_sender_address if result else None
+            ),
+            "newest_matching_date": result.newest_date if result else None,
+            "last_new_match": result.last_new_match if result else None,
         }

@@ -35,6 +35,7 @@ GMAIL_CATEGORIES = ("primary", "updates", "promotions", "social", "forums")
 READ_STATES = ("any", "unread", "read")
 STARRED_STATES = ("any", "starred", "not_starred")
 IMPORTANT_STATES = ("any", "important", "not_important")
+ATTACHMENT_STATES = ("any", "has_attachment", "no_attachment")
 
 
 def validate_imap_folder(value: Any) -> str:
@@ -90,6 +91,8 @@ def normalize_structured_filters(filters: Mapping[str, Any]) -> dict[str, Any]:
     for field in _TEXT_FILTERS:
         if value := _clean_text(filters.get(field), field):
             normalized[field] = value
+    if value := _clean_text(filters.get("attachment_filename"), "attachment_filename"):
+        normalized["attachment_filename"] = value
     for field in _DATE_FILTERS:
         if value := filters.get(field):
             if isinstance(value, (date, datetime)):
@@ -100,6 +103,7 @@ def normalize_structured_filters(filters: Mapping[str, Any]) -> dict[str, Any]:
         ("read_state", READ_STATES),
         ("starred_state", STARRED_STATES),
         ("important_state", IMPORTANT_STATES),
+        ("attachment_state", ATTACHMENT_STATES),
     ):
         value = filters.get(field, "any")
         if value not in allowed:
@@ -162,6 +166,16 @@ def build_structured_search_tokens(filters: Mapping[str, Any]) -> list[str]:
         gmail_terms.append("is:important")
     elif important_state == "not_important":
         gmail_terms.append("-is:important")
+    attachment_state = normalized.get("attachment_state")
+    if attachment_state == "has_attachment":
+        gmail_terms.append("has:attachment")
+    elif attachment_state == "no_attachment":
+        gmail_terms.append("-has:attachment")
+    if attachment_filename := normalized.get("attachment_filename"):
+        escaped = attachment_filename.replace(chr(92), chr(92) * 2).replace(
+            chr(34), chr(92) + chr(34)
+        )
+        gmail_terms.append(f'filename:"{escaped}"')
     if gmail_terms:
         tokens.extend(
             ("X-GM-RAW", quote_imap_search_value(" ".join(gmail_terms), "Gmail filter"))
