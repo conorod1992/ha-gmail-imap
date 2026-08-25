@@ -2,106 +2,262 @@
 
 Read-only Gmail integration for Home Assistant.
 
-Email HA signs in through Google OAuth, listens for new mail with Gmail IMAP
-IDLE, and exposes useful Gmail concepts without requiring ordinary users to
-understand IMAP.
+Email HA brings useful Gmail information into Home Assistant without allowing Home Assistant to change or send email.
+
+You can use it to:
+
+- see how many unread emails you have;
+- react when a new email arrives;
+- watch for specific emails, such as messages from a particular sender or emails containing certain words;
+- create sensors that count emails matching your own filters;
+- find emails from automations;
+- optionally retrieve the readable contents of an email when an automation needs them;
+- connect more than one Gmail account.
+
+Email HA uses Gmail's IMAP connection behind the scenes, but you do not need to understand IMAP for normal use.
+
+> [!NOTE]
+> Email HA is read-only. It can search and read email, but it cannot send, reply, forward, delete, move, label, star, flag, or mark messages read or unread.
 
 ## What you get
 
-- Primary unread and other Gmail category, Important, and Starred sensors
-- Latest email metadata
-- a New email event entity for UI-built automations
-- custom server-side email count sensors
-- per-filter Email watch event entities
-- a friendly `email_ha.find_emails` action
-- explicit, bounded email-body retrieval
-- an advanced raw IMAP search action
-- multiple Gmail accounts
+Email HA can create:
 
-The recommended first setup enables **Primary unread**, **Latest email**, and
-**New email**. All other built-in entities remain available from **Configure >
-Gmail sensors**.
+- **Primary unread** and other Gmail category sensors;
+- **Latest email**, showing the newest email's basic details;
+- a **New email** event you can use in automations;
+- **Custom email sensors** that count matching emails;
+- **Email watches** that react only when a newly arriving email matches your filters;
+- a **Find emails** action with normal fields such as sender, subject, read state, category, and date;
+- a **Get email contents** action for explicitly retrieving readable email content;
+- an advanced raw IMAP search action;
+- separate entities and events for multiple Gmail accounts.
 
-## Installation
+For most users, the recommended first setup is:
 
-### HACS custom repository
+- **Primary unread**
+- **Latest email**
+- **New email**
 
-1. Open HACS and choose **Integrations > Custom repositories**.
-2. Add `https://github.com/conorod1992/ha-gmail-imap` as an **Integration**.
-3. Install **Email HA** and restart Home Assistant.
+You can enable or disable the built-in Gmail entities later from **Configure > Gmail sensors**.
 
-### Manual installation
+---
 
-Copy `custom_components/email_ha` into
-`<home-assistant-config>/custom_components/email_ha`, then restart Home
-Assistant.
+# Installation
 
-## Google sign-in setup
+## HACS custom repository
 
-Google requires each installation to provide its own OAuth client. Email HA
-cannot safely put a shared client secret in a public repository, and Home
-Assistant's application-credentials framework cannot remove this provider
-requirement without a separately operated cloud account-linking service.
+If you already use HACS:
 
-1. Open [Google Cloud Console](https://console.cloud.google.com/) and create or
-   select a project.
-2. Open **Google Auth Platform** and configure the consent screen. For a
-   personal project, choose an external audience. Add the Gmail account under
-   **Test users** while the app is in testing.
-3. Add the OAuth scope `https://mail.google.com/`. Google documents this scope
-   for Gmail IMAP OAuth access. It is a broad mailbox scope; the read-only
-   guarantee comes from Email HA exposing only read-only IMAP operations.
-4. Open **APIs & Services > Credentials**, create an **OAuth client ID**, and
-   select **Web application**.
-5. Add this authorized redirect URI exactly:
-   `https://my.home-assistant.io/redirect/oauth`
-6. In Home Assistant, open **Settings > Devices & services > Application
-   credentials**, choose **Add application credentials**, select **Email HA**,
-   and paste the client ID and client secret.
-7. Add the Email HA integration, enter the Gmail address, and sign in with
-   Google.
+1. Open **HACS**.
+2. Open **Integrations**.
+3. Open the HACS menu and choose **Custom repositories**.
+4. Add:
 
-Email HA does not call the Gmail REST API, so enabling the Gmail API is not a
-prerequisite. The integration authenticates directly to `imap.gmail.com` using
-OAuth2.
+   ```text
+   https://github.com/conorod1992/ha-gmail-imap
+   ```
 
-Personal Gmail accounts no longer have an Enable IMAP switch: Google states
-that IMAP has been always enabled since January 2025. Google Workspace
-administrators can still restrict IMAP for their organisation, so a managed
-account may require its administrator to allow IMAP access. See Google's
-[Gmail client guidance](https://support.google.com/mail/answer/7126229) and
-[Workspace administrator guidance](https://support.google.com/a/answer/9003945).
+5. Choose **Integration** as the repository type.
+6. Install **Email HA**.
+7. Restart Home Assistant.
 
-If setup reports missing credentials, complete steps 1-6 first. If Google
-rejects access, check the redirect URI, consent-screen status, requested scope,
-and test-user list. A callback failure usually means Home Assistant's external
-URL cannot return the browser to the instance.
+Installing the repository through HACS downloads the integration, but you still need to add and configure it in Home Assistant.
 
-## First setup
+After the restart, continue with **Connect your Gmail account** below.
 
-After Google sign-in, Email HA shows a simple Gmail entity list. Recommended
-entities are already selected:
+## Manual installation
 
-- **Primary unread** — unread mail Gmail classifies as Primary
-- **Latest email** — subject and bounded header metadata for the newest email
-- **New email** — an EventEntity for automations
+Copy:
 
-Select any additional Gmail entities you already want, then finish setup. The
-account appears as one service device named `Gmail - you@example.com`.
+```text
+custom_components/email_ha
+```
 
-New mail normally arrives through Gmail IMAP IDLE. A fixed internal 15-minute
-refresh provides resilience if a push is missed; there is no misleading poll
-interval to configure.
+into:
 
-## Gmail sensors
+```text
+<home-assistant-config>/custom_components/email_ha
+```
 
-Open **Settings > Devices & services > Email HA > Configure > Gmail sensors**
-to manage the desired entity set in one screen.
+Then restart Home Assistant.
+
+---
+
+# Connect your Gmail account
+
+Google requires each Email HA installation to have its own Google sign-in credentials.
+
+You only need to set this up once for a Google Cloud project, and the same credentials can be reused if you later add another Gmail account.
+
+You will do three things:
+
+1. create or choose a Google Cloud project;
+2. create Google OAuth sign-in credentials for Email HA;
+3. add those credentials to Home Assistant.
+
+You do **not** need to pay for Google Cloud, and you do **not** need to enable the Gmail REST API.
+
+## 1. Create or choose a Google Cloud project
+
+Open the [Google Cloud Console](https://console.cloud.google.com/) and create a new project, or choose an existing project you are happy to use for Email HA.
+
+## 2. Configure Google sign-in
+
+Open **Google Auth Platform** in Google Cloud.
+
+If Google asks you to configure the app first:
+
+1. Give the app a name, for example **Email HA**.
+2. For a personal Gmail account, choose an **External** audience.
+3. Add the Gmail account you intend to connect under **Test users** while the app remains in testing.
+
+## 3. Add the Gmail mailbox permission
+
+Under the Google OAuth data-access or scopes section, add this scope:
+
+```text
+https://mail.google.com/
+```
+
+Google uses this broad mailbox scope for Gmail IMAP OAuth access.
+
+Although the Google permission itself is broad, Email HA only implements read-only email operations.
+
+## 4. Create an OAuth client
+
+Open:
+
+**APIs & Services > Credentials**
+
+Create an **OAuth client ID** and choose:
+
+**Web application**
+
+Add this authorized redirect URI exactly:
+
+```text
+https://my.home-assistant.io/redirect/oauth
+```
+
+Google will then provide:
+
+- a **Client ID**
+- a **Client secret**
+
+Keep both available for the next step.
+
+## 5. Add the credentials to Home Assistant
+
+In Home Assistant, open:
+
+**Settings > Devices & services > Application credentials**
+
+Choose **Add application credentials**.
+
+Select **Email HA**, then paste in the Google:
+
+- Client ID
+- Client secret
+
+## 6. Add Email HA
+
+Now open:
+
+**Settings > Devices & services > Add integration**
+
+Search for:
+
+**Email HA**
+
+Select it, enter your Gmail address, and continue to Google sign-in.
+
+After Google approves access, Email HA will ask which Gmail entities you want to enable.
+
+Recommended entities are already selected.
+
+> [!TIP]
+> If Google rejects access while your OAuth app is still in testing, make sure the Gmail address you are signing in with has been added under **Test users** in Google Auth Platform.
+
+## Do I need to enable the Gmail API?
+
+No.
+
+Email HA does not use the Gmail REST API. It connects directly to Gmail's IMAP service using OAuth2.
+
+## Do I need to enable IMAP in Gmail?
+
+For personal Gmail accounts, Google states that IMAP has been always enabled since January 2025.
+
+Google Workspace administrators can still restrict IMAP for managed accounts, so a work or organisation account may require its administrator to allow IMAP access.
+
+See:
+
+- [Google Gmail client guidance](https://support.google.com/mail/answer/7126229)
+- [Google Workspace administrator guidance](https://support.google.com/a/answer/9003945)
+
+---
+
+# First setup
+
+After Google sign-in, Email HA shows a list of Gmail entities.
+
+The recommended entities are already selected:
+
+- **Primary unread** — unread emails Gmail classifies as Primary
+- **Latest email** — the newest email's subject, sender, date, and other basic details
+- **New email** — an event entity that can trigger Home Assistant automations
+
+Select any additional Gmail entities you already know you want, then finish setup.
+
+The Gmail account appears in Home Assistant as one device named similar to:
+
+```text
+Gmail - you@example.com
+```
+
+New mail normally appears near real time.
+
+Email HA keeps Gmail's normal push-style IMAP connection open and also performs an internal 15-minute refresh as a fallback if an update is missed.
+
+There is no poll interval you need to configure.
+
+---
+
+# Which feature should I use?
+
+Email HA provides several ways to work with email.
+
+| If you want to… | Use |
+|---|---|
+| See how many unread Primary emails you have | **Primary unread** |
+| See details of the newest email | **Latest email** |
+| Run an automation whenever any new email arrives | **New email** |
+| Count emails matching your own filters | **Custom email sensor** |
+| Run an automation only when a matching email arrives | **Email watch** |
+| Search your mailbox from an automation | **Find emails** |
+| Read the contents of a specific email | **Get email contents** |
+| Write a raw IMAP search query | **Advanced: Search using IMAP query** |
+
+A useful distinction is:
+
+- a **Custom email sensor** answers **"How many emails match right now?"**
+- an **Email watch** answers **"Did a matching email just arrive?"**
+
+---
+
+# Gmail sensors
+
+Open:
+
+**Settings > Devices & services > Email HA > Configure > Gmail sensors**
+
+to choose which built-in Gmail entities are enabled.
 
 | Entity | Meaning | Recommended |
 |---|---|---:|
 | Primary unread | Unread messages Gmail classifies as Primary | Yes |
-| Latest email | Newest email subject and selected header metadata | Yes |
+| Latest email | Newest email subject, sender, date, and selected basic details | Yes |
 | New email | Event entity for each newly detected email | Yes |
 | Inbox unread | All unread messages carrying the Gmail Inbox label | No |
 | Important unread | Unread mail Gmail classifies as Important | No |
@@ -113,30 +269,34 @@ to manage the desired entity set in one screen.
 | Inbox messages | Total messages carrying the Inbox label | No |
 | Mailbox folders | Count and list of selectable folders | No |
 
-### Primary unread versus Inbox unread
+## Primary unread versus Inbox unread
 
-**Primary unread** is what many people mean by useful unread inbox mail: Gmail
-has classified it into the Primary category.
+These two sensors can be quite different.
 
-**Inbox unread** counts every unread message with the Inbox label, including
-messages that may appear under Promotions, Social, Updates, or Forums. The two
-numbers can therefore differ substantially.
+**Primary unread** counts unread email Gmail has placed in the **Primary** category.
 
-Gmail category and importance counts use Gmail's documented `X-GM-RAW` IMAP
-extension. Starred uses the standard IMAP `\Flagged` state. These details are
-not needed for normal setup.
+**Inbox unread** counts every unread email carrying Gmail's Inbox label, including mail that may appear under:
 
-## Custom email sensors
+- Promotions
+- Social
+- Updates
+- Forums
 
-Choose **Configure > Custom email sensors** to view, add, edit, duplicate, or
-delete count sensors. The management list shows enough of each private filter
-to identify it; entity attributes expose only filter field names, not values.
+For many users, **Primary unread** is the more useful "important unread inbox" count.
 
-The first form contains common filters, including attachment presence. Turn on
-**Add more filters** for To, CC, body text, any text, attachment filename, and
-date filters. Blank fields are ignored and all filled conditions must match.
+---
 
-Examples:
+# Custom email sensors
+
+Open:
+
+**Settings > Devices & services > Email HA > Configure > Custom email sensors**
+
+to add, edit, duplicate, or delete custom email count sensors.
+
+A custom email sensor counts messages that match your chosen filters.
+
+For example, you could create:
 
 | Name | Folder | Filters |
 |---|---|---|
@@ -144,44 +304,99 @@ Examples:
 | Bookings | Inbox | Subject contains `booking`; Read state `Unread` |
 | Starred Primary | Inbox | Gmail category `Primary`; Starred state `Starred` |
 
-Gmail performs custom sensor searches server-side. Email HA retrieves the
-matching UID count and bounded header metadata for the newest match; it does
-not download bodies to calculate a count. Up to 20 custom sensors can be
-configured per account.
+The first form contains the most common filters, including whether an attachment is present.
 
-Custom sensor attributes include `newest_matching_uid`, subject, sender name,
-sender address, and date. These describe current mailbox state, including mail
-that existed before Home Assistant started. `last_new_match` is different: it
-is set only when Email HA observes a genuinely new arrival that matches the
-sensor. It is runtime observation state and resets when the integration is
-reloaded. Filter values remain private; attributes list filter field names
-only.
+Turn on **Add more filters** to use additional fields such as:
 
-Discovered folders are offered in the folder selector. An exact folder name
-can still be entered for advanced or localised Gmail folder layouts.
+- To
+- CC
+- Body text
+- Any text
+- Attachment filename
+- Date filters
 
-## Email watches
+Blank fields are ignored.
 
-Choose **Configure > Email watches** to add, edit, duplicate, or delete an
-event stream for matching new mail. A custom sensor answers "how many messages
-match now?" An Email watch answers "did a matching message just arrive?" Each
-watch has its own discoverable EventEntity and keeps the same entity identity
-when renamed. Up to 20 watches can be configured per account.
+If you fill in more than one filter, **all filled conditions must match**.
 
-Watch event type `new_matching_email` includes account, folder, UID,
-Message-ID, subject, sender name/address, date, watch ID, and watch name when
-available. It never contains a body or filter values. Matching is constrained
-to the newly detected folder-specific UID; attachments are never downloaded.
+## What does a custom sensor retrieve?
 
-Watch baselines use Gmail UIDVALIDITY and UIDNEXT. Historical matches are not
-fired at startup, after an integration reload, or when a watch is created.
-Changing an old message or changing a historical count is not a new arrival.
+Gmail performs the search.
 
-### RSA email watch
+Email HA receives:
 
-Create a watch named **RSA emails** with **From contains** `rsa.ie` and
-**Subject contains** `check test`, then select its event entity in an
-automation:
+- the number of matching messages;
+- basic details for the newest matching message.
+
+Email HA does **not** download message bodies simply to calculate a sensor count.
+
+A custom sensor can expose details such as:
+
+- newest matching message ID within the folder;
+- subject;
+- sender name;
+- sender address;
+- date.
+
+It can also record when Email HA last observed a genuinely new matching email.
+
+That "last new match" value only tracks new messages seen while the integration is running and resets when the integration is reloaded.
+
+Up to **20 custom email sensors** can be configured per Gmail account.
+
+## Folders
+
+Email HA offers discovered Gmail folders in the folder selector.
+
+If needed, advanced users can also type an exact folder name manually, which can be useful for localised or unusual Gmail folder layouts.
+
+---
+
+# Email watches
+
+Open:
+
+**Settings > Devices & services > Email HA > Configure > Email watches**
+
+to add, edit, duplicate, or delete watches.
+
+An Email watch fires an event only when a **newly arriving email** matches your chosen filters.
+
+This is usually the easiest option when you want an automation to react only to a particular type of email.
+
+For example:
+
+- emails from a particular company;
+- booking emails;
+- emails containing a certain subject;
+- emails with attachments;
+- unread Primary emails from a certain sender.
+
+Each Email watch gets its own event entity in Home Assistant.
+
+Up to **20 Email watches** can be configured per Gmail account.
+
+## Example: RSA email watch
+
+Create a watch named:
+
+**RSA emails**
+
+with filters such as:
+
+- **From contains:** `rsa.ie`
+- **Subject contains:** `check test`
+
+Then use that watch's event entity as the trigger in an automation.
+
+In the Home Assistant automation editor:
+
+1. add an **Event received** trigger;
+2. choose the Email HA event entity for **RSA emails**;
+3. choose event type **new_matching_email**;
+4. add whatever action you want, such as a mobile notification.
+
+Equivalent YAML:
 
 ```yaml
 triggers:
@@ -191,6 +406,7 @@ triggers:
     options:
       event_type:
         - new_matching_email
+
 actions:
   - action: notify.mobile_app_your_phone
     data:
@@ -198,11 +414,16 @@ actions:
       message: "{{ trigger.to_state.attributes.subject }}"
 ```
 
-### Booking watch without body retrieval
+Select your real entity in the UI rather than copying the example entity ID.
 
-A **New booking** watch can use **Subject contains** `booking` and **Attachment
-filename contains** `pdf`. The automation reacts using safe event metadata and
-does not call `get_email_contents`:
+## Example: booking watch with an attachment
+
+A watch named **New booking** could use:
+
+- **Subject contains:** `booking`
+- **Attachment filename contains:** `pdf`
+
+Then react to that event:
 
 ```yaml
 triggers:
@@ -212,6 +433,7 @@ triggers:
     options:
       event_type:
         - new_matching_email
+
 actions:
   - action: persistent_notification.create
     data:
@@ -221,12 +443,45 @@ actions:
         {{ trigger.to_state.attributes.subject }}.
 ```
 
-## Automations
+Email watch events include basic email details such as:
 
-### Notify when any new email arrives
+- account;
+- folder;
+- message identifier;
+- subject;
+- sender name;
+- sender address;
+- date;
+- watch name.
 
-In the automation editor, choose the **Event received** trigger, select the
-account's **New email** entity, and select event type `new_email`.
+They do **not** include the email body or your private filter values.
+
+Existing matching emails are not replayed when:
+
+- Home Assistant starts;
+- Email HA reloads;
+- a new watch is created.
+
+Only newly detected arrivals fire the watch.
+
+---
+
+# Automations
+
+Email HA is designed to work with Home Assistant's normal automation editor.
+
+The YAML below is mainly provided as a reference or for users who prefer editing automations in YAML.
+
+## Notify when any new email arrives
+
+In the automation editor:
+
+1. add an **Event received** trigger;
+2. select the Gmail account's **New email** entity;
+3. choose event type **new_email**;
+4. add a notification or other action.
+
+Equivalent YAML:
 
 ```yaml
 triggers:
@@ -236,6 +491,7 @@ triggers:
     options:
       event_type:
         - new_email
+
 actions:
   - action: notify.mobile_app_your_phone
     data:
@@ -245,11 +501,25 @@ actions:
         {{ trigger.to_state.attributes.subject or '(no subject)' }}
 ```
 
-Select the real entity in the UI instead of copying the example entity ID.
-Event data contains account, folder, UID, Message-ID when available, subject,
-sender name/address, and date. It never contains a message body.
+Select your real entity in Home Assistant rather than copying the example entity ID.
 
-### Notify only for a specific sender
+The New email event provides details such as:
+
+- account;
+- folder;
+- message identifier;
+- subject;
+- sender name;
+- sender address;
+- date.
+
+It never includes the email body.
+
+## Notify only for a particular sender
+
+For most cases, creating an **Email watch** is easier than adding template conditions to the general New email event.
+
+If you do want to filter the New email event directly, you can use a condition such as:
 
 ```yaml
 triggers:
@@ -259,23 +529,26 @@ triggers:
     options:
       event_type:
         - new_email
+
 conditions:
   - condition: template
     value_template: >-
       {{ 'rsa.ie' in (trigger.to_state.attributes.sender_address | lower) }}
+
 actions:
   - action: notify.mobile_app_your_phone
     data:
       message: "{{ trigger.to_state.attributes.subject }}"
 ```
 
-### Run when Primary unread becomes greater than zero
+## Run when Primary unread becomes greater than zero
 
 ```yaml
 triggers:
   - trigger: numeric_state
     entity_id: sensor.gmail_you_example_com_primary_unread
     above: 0
+
 actions:
   - action: persistent_notification.create
     data:
@@ -283,7 +556,51 @@ actions:
       message: You have unread Primary email.
 ```
 
-### Find emails with a response variable
+---
+
+# Actions
+
+Email HA provides three mailbox actions.
+
+For most users:
+
+1. use **Find emails** to search;
+2. use **Get email contents** only if you actually need the body;
+3. use **Advanced: Search using IMAP query** only if you already understand IMAP search syntax.
+
+## Find emails
+
+`email_ha.find_emails` is the normal search action.
+
+It provides standard fields such as:
+
+- From
+- To
+- CC
+- Subject
+- Body
+- Any text
+- Read state
+- Starred state
+- Importance
+- Gmail category
+- Date
+- Attachment presence
+- Attachment filename
+
+Blank filters are ignored.
+
+If you fill in several filters, they are combined with **AND**.
+
+Search results are returned newest first.
+
+By default, Find emails returns metadata only and does not retrieve message bodies.
+
+## Example: find unread RSA renewal emails
+
+Home Assistant actions can save their result into a **response variable**, which lets later steps in the same automation use that result.
+
+In this example, the search results are stored as `found_mail`:
 
 ```yaml
 actions:
@@ -294,47 +611,14 @@ actions:
       read_state: unread
       max_results: 5
     response_variable: found_mail
+
   - action: persistent_notification.create
     data:
       title: RSA email count
       message: "Found {{ found_mail.count }} matching emails."
 ```
 
-### Find an email and explicitly retrieve its body
-
-```yaml
-actions:
-  - action: email_ha.find_emails
-    data:
-      subject: booking
-      max_results: 1
-    response_variable: found_mail
-  - if: "{{ found_mail.count > 0 }}"
-    then:
-      - action: email_ha.get_email_contents
-        data:
-          folder: "{{ found_mail.folder }}"
-          uid: "{{ found_mail.emails[0].uid }}"
-          body_max_chars: 4000
-        response_variable: selected_email
-      - action: persistent_notification.create
-        data:
-          title: "{{ selected_email.message.subject }}"
-          message: "{{ selected_email.message.plain_text_body }}"
-```
-
-## Actions
-
-### Find emails
-
-`email_ha.find_emails` is the normal action. It provides friendly From, To, CC,
-Subject, Body, Any text, read, starred, importance, category, and date fields.
-Blank filters are ignored; filled filters combine with AND.
-
-Attachment filters use Gmail's server-side search. **Attachment** accepts Any,
-Has attachment, or No attachment. **Attachment filename contains** safely
-builds Gmail's `filename:` criterion; Gmail decides substring/token matching,
-so it is not a local MIME filename parser.
+## Attachment filters
 
 Find messages with any attachment:
 
@@ -356,23 +640,79 @@ data:
 response_variable: pdf_mail
 ```
 
-Searches return newest matches first and include metadata only by default. Set
-`include_body: true` only when the automation needs bounded readable content.
-The body limit is 1-20,000 characters per message and result count is limited
-to 1-25. When MIME content is explicitly retrieved, results also include
-`has_attachments`, `attachment_count`, and bounded filename/content-type
-metadata; attachment payloads are never exposed.
+Gmail performs the filename search, so Gmail decides how text such as `pdf` matches attachment names.
 
-### Get email contents
+## Including email bodies in Find emails
 
-`email_ha.get_email_contents` retrieves one folder-specific UID returned by
-Find emails or the New email event. It uses read-only `BODY.PEEK` and returns a
-plain/readable bounded body plus attachment metadata. UIDs are valid only in
-their folder.
+Set:
 
-### Advanced: Search using IMAP query
+```yaml
+include_body: true
+```
 
-`email_ha.search_emails` accepts raw standard IMAP SEARCH criteria such as:
+only when the automation actually needs readable email content.
+
+The readable body limit is configurable from **1 to 20,000 characters per message**.
+
+Find emails returns at most **25 messages**.
+
+When readable content is requested, results can also include attachment metadata such as:
+
+- whether attachments exist;
+- attachment count;
+- bounded filenames;
+- content types.
+
+Attachment file contents are never exposed.
+
+---
+
+# Get email contents
+
+`email_ha.get_email_contents` retrieves one specific email using the folder and message ID returned by:
+
+- **Find emails**;
+- the **New email** event;
+- an **Email watch** event.
+
+It returns a readable text version of the email, limited to the configured maximum length.
+
+Example:
+
+```yaml
+actions:
+  - action: email_ha.find_emails
+    data:
+      subject: booking
+      max_results: 1
+    response_variable: found_mail
+
+  - if: "{{ found_mail.count > 0 }}"
+    then:
+      - action: email_ha.get_email_contents
+        data:
+          folder: "{{ found_mail.folder }}"
+          uid: "{{ found_mail.emails[0].uid }}"
+          body_max_chars: 4000
+        response_variable: selected_email
+
+      - action: persistent_notification.create
+        data:
+          title: "{{ selected_email.message.subject }}"
+          message: "{{ selected_email.message.plain_text_body }}"
+```
+
+This is a more advanced automation example because it passes the result of one action into another.
+
+---
+
+# Advanced: Search using IMAP query
+
+`email_ha.search_emails` accepts raw standard IMAP SEARCH criteria.
+
+Most users should use **Find emails** instead.
+
+Example:
 
 ```yaml
 action: email_ha.search_emails
@@ -383,78 +723,260 @@ data:
 response_variable: advanced_results
 ```
 
-This action is intended for users who already understand IMAP. Gmail web-search
-syntax is not standard IMAP syntax; Gmail-specific raw expressions require the
-documented `X-GM-RAW` extension.
+This action is intended for users who already understand IMAP search syntax.
 
-## Multiple accounts
+Gmail web-search syntax is not the same as standard IMAP syntax.
 
-Add the integration once for each Gmail address. Accounts can reuse the same
-Google OAuth client. Every account has its own device, coordinator, folder UID
-baselines, New email entity, and Email watch entities. Events never cross
-accounts.
+Gmail-specific raw searches require Gmail's documented `X-GM-RAW` extension.
 
-Actions automatically use the only loaded account. When more than one account
-is loaded, select **Account** in the action UI so no arbitrary account is used.
+---
 
-## Privacy and security
+# Multiple Gmail accounts
 
-- OAuth2 tokens are managed by Home Assistant's application-credentials helper.
-- Gmail IMAP requires Google's broad `https://mail.google.com/` OAuth scope;
-  unlike a Gmail REST API scope, there is no narrower read-only IMAP scope. The
-  integration enforces read-only behaviour by its implemented command surface.
-- All Gmail traffic uses TLS and XOAUTH2.
-- Folders are opened read-only with IMAP `EXAMINE`.
-- Fetches use `BODY.PEEK`, so retrieval does not intentionally mark mail read.
-- Count sensors use server-side searches and do not fetch message bodies.
+Add Email HA once for each Gmail address you want to connect.
+
+The same Google OAuth client can be reused for multiple accounts.
+
+Each Gmail account has its own:
+
+- Home Assistant device;
+- Gmail sensors;
+- Latest email entity;
+- New email event;
+- Custom email sensors;
+- Email watches;
+- folder tracking.
+
+Events never cross between accounts.
+
+If only one Gmail account is loaded, Email HA actions can use it automatically.
+
+If more than one account is loaded, select **Account** in the action UI so Home Assistant knows which mailbox to use.
+
+---
+
+# Privacy and security
+
+## Plain-language summary
+
+Email HA is deliberately read-only.
+
+It does not provide actions that can:
+
+- send email;
+- reply;
+- forward;
+- delete;
+- move;
+- label;
+- star;
+- flag;
+- mark email read;
+- mark email unread.
+
+Normal count sensors and New email / Email watch events do not retrieve message bodies.
+
+An automation must explicitly request readable email contents when it needs them.
+
+Be careful when passing retrieved email content into:
+
+- notifications;
+- logs;
+- conversation agents;
+- other automations;
+
+because email content can contain private information.
+
+## Technical security details
+
+- OAuth2 tokens are managed by Home Assistant's application-credentials system.
+- Gmail IMAP requires Google's broad `https://mail.google.com/` OAuth scope.
+- Gmail does not offer a narrower read-only scope specifically for IMAP.
+- Email HA enforces read-only behaviour by only implementing read-only mailbox operations.
+- Gmail traffic uses TLS and XOAUTH2.
+- Folders are opened read-only using IMAP `EXAMINE`.
+- Message fetches use `BODY.PEEK`, so retrieving content does not intentionally mark mail as read.
+- Count sensors use server-side searches and do not fetch bodies.
 - Find emails and advanced search omit bodies by default.
-- Body retrieval is explicit, bounded to 20,000 readable characters, and capped
-  at 2 MB of source message data before parsing.
-- HTML is converted locally to readable text. Scripts, remote images, tracking
-  pixels, styles, and links are not loaded.
-- Attachment metadata may be returned; attachment bytes are never downloaded or
-  exposed.
-- Email HA has no send, reply, forward, delete, move, label, star, flag, or
-  mark-read/unread operation.
+- Explicit body retrieval is limited to 20,000 readable characters.
+- Source message data is capped at 2 MB before parsing.
+- HTML is converted locally to readable text.
+- Scripts, remote images, tracking pixels, styles, and links are not loaded.
+- Attachment metadata can be returned, but attachment file bytes are never downloaded or exposed.
 
-Be deliberate when exposing action responses to notifications, logs,
-conversation agents, or other automations because explicitly retrieved content
-can be private.
+---
 
-## Advanced account and IMAP behaviour
+# Advanced account settings
 
-**Configure > Advanced account settings** can change the folder used by Latest
-email and New email. Inbox is recommended. Fixed Gmail count sensors keep their
-documented Inbox meaning regardless of this setting.
+Open:
 
-Gmail IMAP UIDs are monotonically increasing only within one folder and one
-UIDVALIDITY generation. Email HA records UIDVALIDITY and UIDNEXT on initial
-startup, emits nothing for existing mail, and then fetches only UIDs above that
-baseline. This prevents deleting or moving the newest email from making an
-older message look new. Multiple arrivals are emitted oldest UID to newest UID.
-To keep work bounded, a single refresh emits at most the newest 25 arrivals and
-advances the baseline; skipped bursts are logged without replaying old mail.
+**Settings > Devices & services > Email HA > Configure > Advanced account settings**
 
-IDLE reconnects retain the baseline. Reloading the integration establishes a
-fresh baseline, so existing messages are not replayed. UIDs copied or moved to
-another folder receive folder-specific identity and may be new within that
-folder.
+to change the folder used by:
 
-Google documents Gmail's category/importance search support in its
-[IMAP extensions](https://developers.google.com/workspace/gmail/imap/imap-extensions).
+- **Latest email**
+- **New email**
 
-## Troubleshooting
+Inbox is recommended.
 
-- **Missing application credentials:** complete the Google sign-in setup before
-  adding the integration.
-- **Google rejected access:** verify the consent screen, test user, exact scope,
-  client secret, and redirect URI.
-- **Managed account cannot connect:** ask the Workspace administrator whether
-  IMAP and the OAuth app are allowed.
-- **Folder unavailable:** choose a discovered folder under Configure or copy its
-  exact IMAP identifier.
-- **No immediate update:** Gmail IDLE is the normal path; the internal resilience
-  refresh runs every 15 minutes.
+The built-in Gmail count sensors keep their documented Inbox meaning regardless of this setting.
+
+---
+
+# Technical details
+
+You do not need this section for normal setup or use.
+
+## How new mail is detected
+
+Email HA normally receives new-mail updates through Gmail IMAP IDLE.
+
+A fixed internal 15-minute refresh acts as a fallback if an update is missed.
+
+Email HA therefore does not expose a user-configurable polling interval.
+
+## How Email HA avoids replaying old mail
+
+Gmail assigns message UIDs within each folder.
+
+Email HA records Gmail's folder tracking values when it starts, then only treats later UIDs as new arrivals.
+
+This prevents situations such as deleting or moving the newest email from causing an older message to be mistaken for a new arrival.
+
+Existing messages are not emitted when:
+
+- Home Assistant starts;
+- the integration reloads;
+- a new Email watch is created.
+
+Multiple newly detected messages are emitted in arrival order.
+
+To keep processing bounded, one refresh handles at most the newest **25 arrivals** before advancing the folder baseline.
+
+Large skipped bursts are logged rather than replayed indefinitely.
+
+## UIDVALIDITY and UIDNEXT
+
+For users familiar with IMAP:
+
+- Email HA tracks Gmail `UIDVALIDITY`;
+- it uses `UIDNEXT` to establish a clean baseline;
+- UIDs are only meaningful within one folder and one UIDVALIDITY generation;
+- reconnecting IMAP IDLE keeps the existing baseline;
+- reloading the integration creates a new baseline;
+- copying or moving a message to another folder gives it folder-specific identity.
+
+## Gmail-specific search behaviour
+
+Gmail category and importance counts use Gmail's documented `X-GM-RAW` IMAP extension.
+
+Starred state uses the standard IMAP `\Flagged` state.
+
+Google documents Gmail-specific IMAP search behaviour here:
+
+[Google Gmail IMAP extensions](https://developers.google.com/workspace/gmail/imap/imap-extensions)
+
+---
+
+# Troubleshooting
+
+## Email HA does not appear when I search for integrations
+
+Check that:
+
+1. Email HA is installed in HACS;
+2. Home Assistant has been restarted since installation;
+3. your browser has been refreshed.
+
+Remember that installing through HACS downloads the integration, but you must still add it from:
+
+**Settings > Devices & services > Add integration**
+
+## Home Assistant says application credentials are missing
+
+Complete the Google OAuth setup first, then add the credentials under:
+
+**Settings > Devices & services > Application credentials**
+
+Select **Email HA** and enter the Google Client ID and Client secret.
+
+## Google rejected access
+
+Check:
+
+- the OAuth consent screen is configured;
+- the Gmail account is listed under **Test users** while the app is in testing;
+- the scope is exactly:
+
+  ```text
+  https://mail.google.com/
+  ```
+
+- the OAuth client type is **Web application**;
+- the redirect URI is exactly:
+
+  ```text
+  https://my.home-assistant.io/redirect/oauth
+  ```
+
+- the Client ID and Client secret were copied correctly.
+
+## Google says the app is unverified or blocked
+
+For a personal OAuth project that is still in testing, make sure the Gmail account you are signing in with is listed under **Test users**.
+
+## Home Assistant reports an OAuth callback problem
+
+A callback failure usually means Home Assistant does not have a usable external URL for returning the browser to your instance.
+
+Check your Home Assistant external URL configuration and My Home Assistant redirect setup.
+
+## A managed Google Workspace account cannot connect
+
+Ask the Google Workspace administrator whether:
+
+- IMAP is allowed;
+- the OAuth app is allowed.
+
+Workspace administrators can restrict mailbox access even though personal Gmail accounts have IMAP enabled automatically.
+
+## I installed Email HA but do not see all the sensors
+
+Only the recommended entities are enabled by default.
+
+Open:
+
+**Settings > Devices & services > Email HA > Configure > Gmail sensors**
+
+to enable additional Gmail entities.
+
+## An Email watch did not fire for an existing email
+
+This is expected.
+
+Email watches only react to newly detected arrivals.
+
+Existing matching messages are deliberately not replayed when:
+
+- Home Assistant starts;
+- Email HA reloads;
+- a watch is created.
+
+## A folder is unavailable
+
+Use a discovered folder from the folder selector where possible.
+
+Advanced users can also enter the exact IMAP folder name manually.
+
+## A new email did not appear immediately
+
+Gmail IMAP IDLE is the normal update path and is usually near real time.
+
+Email HA also performs an internal refresh every 15 minutes as a resilience fallback.
+
+---
+
+# Debug logging
 
 Temporary debug logging can be enabled with:
 
@@ -464,10 +986,13 @@ logger:
     custom_components.email_ha: debug
 ```
 
-Review logs before sharing them. Email HA does not log tokens or bodies, but
-account identifiers and operational metadata can still be sensitive.
+Review logs before sharing them.
 
-## Development validation
+Email HA does not intentionally log OAuth tokens or email bodies, but account identifiers and operational metadata can still be sensitive.
+
+---
+
+# Development validation
 
 Local checks:
 
