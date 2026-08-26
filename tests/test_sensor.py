@@ -10,7 +10,12 @@ import pytest
 
 from custom_components.email_ha.coordinator import EmailData, SearchCountData
 from custom_components.email_ha.gmail import GMAIL_ENTITIES
-from custom_components.email_ha.sensor import CustomEmailCountSensor, GmailSensor
+from custom_components.email_ha.sensor import (
+    ConnectionStatusSensor,
+    CustomEmailCountSensor,
+    GmailSensor,
+    LastSuccessfulUpdateSensor,
+)
 
 
 def _entry(enabled: list[str] | None = None):
@@ -28,6 +33,26 @@ def _coordinator(data: EmailData):
         last_success_time=datetime.now(timezone.utc),
         last_update_success=True,
     )
+
+
+def test_health_sensors_remain_available_and_use_freshness() -> None:
+    """Diagnostics stay visible while accurately reporting a stale account."""
+    recent = datetime.now(timezone.utc)
+    coordinator = _coordinator(EmailData())
+    coordinator.last_success_time = recent
+    status = ConnectionStatusSensor(coordinator, _entry())
+    timestamp = LastSuccessfulUpdateSensor(coordinator, _entry())
+
+    assert status.available is True
+    assert status.native_value == "Healthy"
+    assert timestamp.available is True
+    assert timestamp.native_value == recent
+    assert timestamp.device_class.value == "timestamp"
+
+    coordinator.last_success_time = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    assert status.available is True
+    assert status.native_value == "Stale"
+    assert timestamp.native_value.year == 2020
 
 
 @pytest.mark.parametrize(

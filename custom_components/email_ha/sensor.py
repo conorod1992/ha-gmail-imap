@@ -222,7 +222,11 @@ class ConnectionStatusSensor(_BaseEmailSensor):
 
     @property
     def native_value(self) -> str:
-        return "Healthy" if self.coordinator.last_update_success else "Disconnected"
+        timestamp = self.coordinator.last_success_time
+        fresh = timestamp is not None and (
+            datetime.now(timezone.utc) - timestamp
+        ).total_seconds() <= UNAVAILABLE_AFTER_SECONDS
+        return "Healthy" if self.coordinator.last_update_success and fresh else "Stale"
 
 
 class LastSuccessfulUpdateSensor(_BaseEmailSensor):

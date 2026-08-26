@@ -187,6 +187,7 @@ def _custom_advanced_schema(values: dict[str, Any]) -> vol.Schema:
             if field in {"since", "before", "on"}
             else selector.TextSelector()
         )
+    fields[vol.Optional("test_filter", default=False)] = selector.BooleanSelector()
     return vol.Schema(fields)
 
 
@@ -533,10 +534,10 @@ class EmailHAOptionsFlow(OptionsFlow):
                         CONF_FOLDER: folder,
                         "filters": {**advanced, **common},
                     }
-                    if user_input.get("test_filter"):
-                        return await self.async_step_custom_sensor_preview()
                     if user_input.get("more_filters"):
                         return await self.async_step_custom_sensor_advanced()
+                    if user_input.get("test_filter"):
+                        return await self.async_step_custom_sensor_preview()
                     return self._finish_custom_sensor()
         return self.async_show_form(
             step_id="custom_sensor_common",
@@ -564,6 +565,8 @@ class EmailHAOptionsFlow(OptionsFlow):
             try:
                 advanced = normalize_structured_filters(user_input)
                 self._custom_draft["filters"] = {**common, **advanced}
+                if user_input.get("test_filter"):
+                    return await self.async_step_custom_sensor_preview()
                 return self._finish_custom_sensor()
             except ValueError:
                 errors["base"] = "invalid_custom_sensor"
@@ -727,10 +730,10 @@ class EmailHAOptionsFlow(OptionsFlow):
                     "filters": {**advanced, **common},
                     "enabled": bool(user_input.get("enabled", True)),
                 }
-                if user_input.get("test_filter"):
-                    return await self.async_step_email_watch_preview()
                 if user_input.get("more_filters"):
                     return await self.async_step_email_watch_advanced()
+                if user_input.get("test_filter"):
+                    return await self.async_step_email_watch_preview()
                 return self._finish_email_watch()
         return self.async_show_form(
             step_id="email_watch_common",
@@ -751,7 +754,8 @@ class EmailHAOptionsFlow(OptionsFlow):
             return self.async_show_form(step_id=step_id, data_schema=vol.Schema({vol.Required("save", default=False): selector.BooleanSelector()}), errors={"base": "filter_test_failed"})
         try:
             messages = await coordinator.async_preview_filter(draft.get(CONF_FOLDER, DEFAULT_FOLDER), draft.get("filters", {}), 5)
-            preview = "No matching emails." if not messages else "\n".join(f"• {item.get('subject') or '(no subject)'} — {(item.get('sender') or {}).get('address', '')} — {item.get('date') or ''}" for item in messages)
+            preview = "Showing up to 5 newest matching emails."
+            preview += "\nNo matching emails." if not messages else "\n" + "\n".join(f"• {item.get('subject') or '(no subject)'} — {(item.get('sender') or {}).get('address', '')} — {item.get('date') or ''}" for item in messages)
             return self.async_show_form(step_id=step_id, data_schema=vol.Schema({vol.Required("save", default=False): selector.BooleanSelector()}), description_placeholders={"preview": preview})
         except (ImapClientError, ValueError):
             return self.async_show_form(step_id=step_id, data_schema=vol.Schema({vol.Required("save", default=False): selector.BooleanSelector()}), errors={"base": "filter_test_failed"})
@@ -770,6 +774,8 @@ class EmailHAOptionsFlow(OptionsFlow):
             try:
                 advanced = normalize_structured_filters(user_input)
                 self._watch_draft["filters"] = {**common, **advanced}
+                if user_input.get("test_filter"):
+                    return await self.async_step_email_watch_preview()
                 return self._finish_email_watch()
             except ValueError:
                 errors["base"] = "invalid_email_watch"
