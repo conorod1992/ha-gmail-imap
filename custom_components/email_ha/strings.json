@@ -92,7 +92,8 @@
           "important_state": "Gmail importance",
           "starred_state": "Starred state",
           "attachment_state": "Attachment",
-          "more_filters": "Add more filters"
+          "more_filters": "Add more filters",
+          "enabled": "Enabled"
         },
         "data_description": {
           "name": "A clear entity name, such as RSA unread or Bookings.",
@@ -213,7 +214,9 @@
       "forums_unread": {"name": "Forums unread"},
       "inbox_messages": {"name": "Inbox messages"},
       "mailbox_folders": {"name": "Mailbox folders"},
-      "latest_email": {"name": "Latest email"}
+      "latest_email": {"name": "Latest email"},
+      "connection_status": {"name": "Connection status"},
+      "last_successful_update": {"name": "Last successful update"}
     }
   },
   "services": {

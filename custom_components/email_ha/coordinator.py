@@ -270,6 +270,8 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             *((sensor, False) for sensor in self.custom_sensors),
             *((watch, True) for watch in self.email_watches),
         ):
+            if is_watch and not definition.get("enabled", True):
+                continue
             definition_id = str(definition.get("id", ""))
             folder = str(definition.get("folder", DEFAULT_FOLDER))
             if not definition_id or not arrivals.get(folder):
@@ -337,7 +339,12 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             count, newest_uid = await client.count_emails(DEFAULT_FOLDER, tokens)
             gmail_counts[definition.key] = SearchCountData(count, newest_uid)
 
-        tracked_definitions = [*self.custom_sensors, *self.email_watches]
+        # A paused watch remains configured but must not cause matching queries
+        # or header fetching. Missing ``enabled`` is the legacy-enabled default.
+        tracked_definitions = [
+            *self.custom_sensors,
+            *(watch for watch in self.email_watches if watch.get("enabled", True)),
+        ]
         tracked_folders = {
             str(item.get("folder", DEFAULT_FOLDER)) for item in tracked_definitions
         }
@@ -443,7 +450,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         definitions = {str(watch.get("id", "")): watch for watch in self.email_watches}
         for watch_id, message in matches:
             watch = definitions.get(watch_id)
-            if watch is None:
+            if watch is None or not watch.get("enabled", True):
                 continue
             sender = message.get("sender") or {}
             payload = {

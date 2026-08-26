@@ -50,6 +50,7 @@ async def async_setup_entry(
         CustomEmailCountSensor(coordinator, entry, sensor)
         for sensor in entry.options.get(CONF_CUSTOM_SENSORS, [])
     )
+    entities.extend([ConnectionStatusSensor(coordinator, entry), LastSuccessfulUpdateSensor(coordinator, entry)])
     async_add_entities(entities)
 
 
@@ -202,3 +203,34 @@ class CustomEmailCountSensor(_BaseEmailSensor):
             "newest_matching_date": result.newest_date if result else None,
             "last_new_match": result.last_new_match if result else None,
         }
+
+
+class ConnectionStatusSensor(_BaseEmailSensor):
+    """A disabled-by-default, actionable account health indicator."""
+
+    _attr_translation_key = "connection_status"
+    _attr_entity_registry_enabled_default = False
+    _attr_icon = "mdi:email-check-outline"
+
+    def __init__(self, coordinator: EmailDataUpdateCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "connection_status")
+
+    @property
+    def native_value(self) -> str:
+        return "Connected" if self.coordinator.last_update_success else "Unavailable"
+
+
+class LastSuccessfulUpdateSensor(_BaseEmailSensor):
+    """A disabled-by-default timestamp for diagnosing stale connections."""
+
+    _attr_translation_key = "last_successful_update"
+    _attr_entity_registry_enabled_default = False
+    _attr_icon = "mdi:clock-check-outline"
+
+    def __init__(self, coordinator: EmailDataUpdateCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "last_successful_update")
+
+    @property
+    def native_value(self) -> str | None:
+        timestamp = self.coordinator.last_success_time
+        return timestamp.isoformat() if timestamp else None

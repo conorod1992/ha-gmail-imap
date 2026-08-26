@@ -50,6 +50,7 @@ from .search import (
     STARRED_STATES,
     build_structured_search_tokens,
     normalize_structured_filters,
+    summarize_structured_filters,
     validate_imap_folder,
 )
 
@@ -126,12 +127,13 @@ def _folder_selector(folders: list[str]) -> selector.SelectSelector:
     )
 
 
-def _custom_common_schema(folders: list[str], values: dict[str, Any]) -> vol.Schema:
+def _custom_common_schema(
+    folders: list[str], values: dict[str, Any], *, is_watch: bool = False
+) -> vol.Schema:
     """Return the approachable first half of a custom count sensor form."""
     filters = values.get("filters", {})
     has_advanced = any(filters.get(field) for field in _ADVANCED_FILTER_FIELDS)
-    return vol.Schema(
-        {
+    fields: dict[Any, Any] = {
             vol.Required(
                 "name", default=values.get("name", "")
             ): selector.TextSelector(),
@@ -162,8 +164,10 @@ def _custom_common_schema(folders: list[str], values: dict[str, Any]) -> vol.Sch
             vol.Optional(
                 "more_filters", default=has_advanced
             ): selector.BooleanSelector(),
-        }
-    )
+    }
+    if is_watch:
+        fields[vol.Required("enabled", default=values.get("enabled", True))] = selector.BooleanSelector()
+    return vol.Schema(fields)
 
 
 def _custom_advanced_schema(values: dict[str, Any]) -> vol.Schema:
@@ -185,21 +189,14 @@ def _custom_advanced_schema(values: dict[str, Any]) -> vol.Schema:
 
 
 def _custom_sensor_summary(sensor_config: dict[str, Any]) -> str:
-    """Build an identifying management label, including owner-visible values."""
-    filters = sensor_config.get("filters", {})
-    details = [
-        _friendly_folder_name(str(sensor_config.get(CONF_FOLDER, DEFAULT_FOLDER)))
-    ]
-    if state := filters.get("read_state"):
-        details.append("Unread" if state == "unread" else "Read")
-    for field, label in (
-        ("from", "From"),
-        ("subject", "Subject"),
-        ("gmail_category", "Category"),
-    ):
-        if value := filters.get(field):
-            details.append(f'{label} contains "{value}"')
-    return f"{sensor_config.get('name', 'Custom sensor')} — {' · '.join(details)}"
+    """Build an identifying management label from every supported filter."""
+    summary = summarize_structured_filters(
+        sensor_config.get("filters", {}),
+        folder=str(sensor_config.get(CONF_FOLDER, DEFAULT_FOLDER)),
+        short=True,
+    )
+    disabled = " — Disabled" if sensor_config.get("enabled", True) is False else ""
+    return f"{sensor_config.get('name', 'Custom sensor')} — {summary}{disabled}"
 
 
 def _ordered_gmail_entities(selected: set[str]) -> list[str]:
@@ -704,13 +701,14 @@ class EmailHAOptionsFlow(OptionsFlow):
                     "name": name,
                     CONF_FOLDER: folder,
                     "filters": {**advanced, **common},
+                    "enabled": bool(user_input.get("enabled", True)),
                 }
                 if user_input.get("more_filters"):
                     return await self.async_step_email_watch_advanced()
                 return self._finish_email_watch()
         return self.async_show_form(
             step_id="email_watch_common",
-            data_schema=_custom_common_schema(self._folders(), self._watch_draft),
+            data_schema=_custom_common_schema(self._folders(), self._watch_draft, is_watch=True),
             errors=errors,
         )
 
