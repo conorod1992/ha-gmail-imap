@@ -36,6 +36,7 @@ from .const import (
     MAX_EMAIL_WATCHES,
 )
 from .coordinator import coordinator_from_entry
+from .imap_client import ImapClientError
 from .gmail import (
     DEFAULT_GMAIL_ENTITIES,
     GMAIL_ENTITIES,
@@ -164,6 +165,7 @@ def _custom_common_schema(
             vol.Optional(
                 "more_filters", default=has_advanced
             ): selector.BooleanSelector(),
+            vol.Optional("test_filter", default=False): selector.BooleanSelector(),
     }
     if is_watch:
         fields[vol.Required("enabled", default=values.get("enabled", True))] = selector.BooleanSelector()
@@ -440,22 +442,10 @@ class EmailHAOptionsFlow(OptionsFlow):
         """Show one identifying management list for all custom sensors."""
         sensors = self._custom_sensors()
         if user_input is None:
-            choices = [
-                selector.SelectOptionDict(value="add", label="Add a custom sensor")
-            ]
+            choices = [selector.SelectOptionDict(value="add", label="Add a custom sensor")]
             for sensor_config in sensors:
-                summary = _custom_sensor_summary(sensor_config)
                 sensor_id = sensor_config["id"]
-                choices.extend(
-                    selector.SelectOptionDict(
-                        value=f"{action}:{sensor_id}", label=f"{label}: {summary}"
-                    )
-                    for action, label in (
-                        ("edit", "Edit"),
-                        ("duplicate", "Duplicate"),
-                        ("delete", "Delete"),
-                    )
-                )
+                choices.append(selector.SelectOptionDict(value=f"manage:{sensor_id}", label=_custom_sensor_summary(sensor_config)))
             return self.async_show_form(
                 step_id="custom_sensors",
                 data_schema=vol.Schema(
@@ -482,6 +472,11 @@ class EmailHAOptionsFlow(OptionsFlow):
         )
         if selected is None:
             return self.async_abort(reason="custom_sensor_not_found")
+        if action == "manage":
+            self._custom_mode = ""
+            self._custom_id = sensor_id
+            self._custom_draft = deepcopy(selected)
+            return await self.async_step_custom_sensor_action()
         self._custom_mode = action
         self._custom_id = sensor_id
         self._custom_draft = deepcopy(selected)
@@ -490,6 +485,17 @@ class EmailHAOptionsFlow(OptionsFlow):
             return await self.async_step_custom_sensor_common()
         if action == "delete":
             return await self.async_step_delete_custom_sensor()
+        return await self.async_step_custom_sensor_common()
+
+    async def async_step_custom_sensor_action(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Choose an operation after selecting one logical sensor."""
+        if user_input is None:
+            return self.async_show_form(step_id="custom_sensor_action", data_schema=vol.Schema({vol.Required("action"): _select(("edit", "duplicate", "delete"), "manage_action")}))
+        self._custom_mode = str(user_input["action"])
+        if self._custom_mode == "delete":
+            return await self.async_step_delete_custom_sensor()
+        if self._custom_mode == "duplicate":
+            self._custom_draft["name"] = f"Copy of {self._custom_draft['name']}"
         return await self.async_step_custom_sensor_common()
 
     async def async_step_custom_sensor_common(
@@ -527,6 +533,8 @@ class EmailHAOptionsFlow(OptionsFlow):
                         CONF_FOLDER: folder,
                         "filters": {**advanced, **common},
                     }
+                    if user_input.get("test_filter"):
+                        return await self.async_step_custom_sensor_preview()
                     if user_input.get("more_filters"):
                         return await self.async_step_custom_sensor_advanced()
                     return self._finish_custom_sensor()
@@ -535,6 +543,12 @@ class EmailHAOptionsFlow(OptionsFlow):
             data_schema=_custom_common_schema(self._folders(), self._custom_draft),
             errors=errors,
         )
+
+    async def async_step_custom_sensor_preview(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Preview a draft without saving it or creating an entity."""
+        if user_input is None:
+            return await self._async_show_preview("custom_sensor_preview", self._custom_draft)
+        return self._finish_custom_sensor() if user_input.get("save") else await self.async_step_custom_sensor_common()
 
     async def async_step_custom_sensor_advanced(
         self, user_input: dict[str, Any] | None = None
@@ -620,22 +634,10 @@ class EmailHAOptionsFlow(OptionsFlow):
         """Manage watches using the same structured-filter UX as sensors."""
         watches = self._email_watches()
         if user_input is None:
-            choices = [
-                selector.SelectOptionDict(value="add", label="Add an email watch")
-            ]
+            choices = [selector.SelectOptionDict(value="add", label="Add an email watch")]
             for watch in watches:
-                summary = _custom_sensor_summary(watch)
                 watch_id = watch["id"]
-                choices.extend(
-                    selector.SelectOptionDict(
-                        value=f"{action}:{watch_id}", label=f"{label}: {summary}"
-                    )
-                    for action, label in (
-                        ("edit", "Edit"),
-                        ("duplicate", "Duplicate"),
-                        ("delete", "Delete"),
-                    )
-                )
+                choices.append(selector.SelectOptionDict(value=f"manage:{watch_id}", label=_custom_sensor_summary(watch)))
             return self.async_show_form(
                 step_id="email_watches",
                 data_schema=vol.Schema(
@@ -661,6 +663,11 @@ class EmailHAOptionsFlow(OptionsFlow):
         )
         if selected is None:
             return self.async_abort(reason="email_watch_not_found")
+        if action == "manage":
+            self._watch_mode = ""
+            self._watch_id = watch_id
+            self._watch_draft = deepcopy(selected)
+            return await self.async_step_email_watch_action()
         self._watch_mode = action
         self._watch_id = watch_id
         self._watch_draft = deepcopy(selected)
@@ -668,6 +675,23 @@ class EmailHAOptionsFlow(OptionsFlow):
             self._watch_draft["name"] = f"Copy of {selected['name']}"
         if action == "delete":
             return await self.async_step_delete_email_watch()
+        return await self.async_step_email_watch_common()
+
+    async def async_step_email_watch_action(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Manage one Email watch without mixing actions into its list label."""
+        if user_input is None:
+            options = ("edit", "duplicate", "delete", "disable") if self._watch_draft.get("enabled", True) else ("edit", "duplicate", "delete", "enable")
+            return self.async_show_form(step_id="email_watch_action", data_schema=vol.Schema({vol.Required("action"): _select(options, "manage_action")}))
+        action = str(user_input["action"])
+        if action in {"enable", "disable"}:
+            watches = _upsert_custom_sensor(self._email_watches(), {**self._watch_draft, "enabled": action == "enable"}, sensor_id=str(self._watch_id), replace_id=self._watch_id)
+            return self._save_options({CONF_EMAIL_WATCHES: watches})
+        self._watch_mode = action
+        if action == "delete":
+            return await self.async_step_delete_email_watch()
+        if action == "duplicate":
+            self._watch_draft["name"] = f"Copy of {self._watch_draft['name']}"
+            self._watch_draft["enabled"] = True
         return await self.async_step_email_watch_common()
 
     async def async_step_email_watch_common(
@@ -703,6 +727,8 @@ class EmailHAOptionsFlow(OptionsFlow):
                     "filters": {**advanced, **common},
                     "enabled": bool(user_input.get("enabled", True)),
                 }
+                if user_input.get("test_filter"):
+                    return await self.async_step_email_watch_preview()
                 if user_input.get("more_filters"):
                     return await self.async_step_email_watch_advanced()
                 return self._finish_email_watch()
@@ -711,6 +737,24 @@ class EmailHAOptionsFlow(OptionsFlow):
             data_schema=_custom_common_schema(self._folders(), self._watch_draft, is_watch=True),
             errors=errors,
         )
+
+    async def async_step_email_watch_preview(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Preview a watch draft without affecting UID baselines or events."""
+        if user_input is None:
+            return await self._async_show_preview("email_watch_preview", self._watch_draft)
+        return self._finish_email_watch() if user_input.get("save") else await self.async_step_email_watch_common()
+
+    async def _async_show_preview(self, step_id: str, draft: dict[str, Any]) -> ConfigFlowResult:
+        """Search current draft via a short-lived read-only connection."""
+        coordinator = coordinator_from_entry(self.hass, self.config_entry.entry_id)
+        if coordinator is None:
+            return self.async_show_form(step_id=step_id, data_schema=vol.Schema({vol.Required("save", default=False): selector.BooleanSelector()}), errors={"base": "filter_test_failed"})
+        try:
+            messages = await coordinator.async_preview_filter(draft.get(CONF_FOLDER, DEFAULT_FOLDER), draft.get("filters", {}), 5)
+            preview = "No matching emails." if not messages else "\n".join(f"• {item.get('subject') or '(no subject)'} — {(item.get('sender') or {}).get('address', '')} — {item.get('date') or ''}" for item in messages)
+            return self.async_show_form(step_id=step_id, data_schema=vol.Schema({vol.Required("save", default=False): selector.BooleanSelector()}), description_placeholders={"preview": preview})
+        except (ImapClientError, ValueError):
+            return self.async_show_form(step_id=step_id, data_schema=vol.Schema({vol.Required("save", default=False): selector.BooleanSelector()}), errors={"base": "filter_test_failed"})
 
     async def async_step_email_watch_advanced(
         self, user_input: dict[str, Any] | None = None

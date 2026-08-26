@@ -120,6 +120,21 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         """Return the folder used by Latest email and New email."""
         return self._folder
 
+    @property
+    def idle_running(self) -> bool:
+        """Return whether the account's IDLE task is currently alive."""
+        return self._idle_task is not None and not self._idle_task.done()
+
+    @property
+    def cached_folder_count(self) -> int:
+        """Return the number of folders discovered during the last refresh."""
+        return len(self._cached_folders)
+
+    @property
+    def event_baseline_ready(self) -> bool:
+        """Return whether new-email UID baselines are established."""
+        return self._event_baseline_ready
+
     @callback
     def async_add_new_email_listener(
         self, listener: Callable[[dict[str, Any]], None]
@@ -172,6 +187,14 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             ) from err
         raw = self.oauth_session.token["access_token"]
         return raw.decode() if isinstance(raw, bytes) else str(raw)
+
+    async def async_preview_filter(self, folder: str, filters: dict[str, Any], limit: int = 5) -> list[dict[str, Any]]:
+        """Run a bounded, body-free draft search without touching coordinator state."""
+        tokens = build_structured_search_tokens(filters)
+        access_token = await self._async_ensure_fresh_token()
+        async with ImapClient(self._imap_host, self._imap_port) as client:
+            await client.connect(self._email, access_token)
+            return await client.search_emails_tokens(folder, tokens, limit, include_body=False)
 
     async def _async_detect_new_emails(
         self, client: ImapClient, status: dict[str, int]

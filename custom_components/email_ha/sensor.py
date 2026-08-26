@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import logging
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -216,14 +216,20 @@ class ConnectionStatusSensor(_BaseEmailSensor):
         super().__init__(coordinator, entry, "connection_status")
 
     @property
+    def available(self) -> bool:
+        """Health state must remain visible while the coordinator exists."""
+        return True
+
+    @property
     def native_value(self) -> str:
-        return "Connected" if self.coordinator.last_update_success else "Unavailable"
+        return "Healthy" if self.coordinator.last_update_success else "Disconnected"
 
 
 class LastSuccessfulUpdateSensor(_BaseEmailSensor):
     """A disabled-by-default timestamp for diagnosing stale connections."""
 
     _attr_translation_key = "last_successful_update"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_entity_registry_enabled_default = False
     _attr_icon = "mdi:clock-check-outline"
 
@@ -231,6 +237,10 @@ class LastSuccessfulUpdateSensor(_BaseEmailSensor):
         super().__init__(coordinator, entry, "last_successful_update")
 
     @property
-    def native_value(self) -> str | None:
-        timestamp = self.coordinator.last_success_time
-        return timestamp.isoformat() if timestamp else None
+    def available(self) -> bool:
+        """Retain the last known timestamp while Gmail is unavailable."""
+        return True
+
+    @property
+    def native_value(self) -> datetime | None:
+        return self.coordinator.last_success_time
