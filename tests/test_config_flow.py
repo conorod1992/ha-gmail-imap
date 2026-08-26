@@ -24,6 +24,7 @@ from custom_components.email_ha.config_flow import (
 )
 from custom_components.email_ha.const import CONF_EMAIL, CONF_GMAIL_ENTITIES
 from custom_components.email_ha.gmail import DEFAULT_GMAIL_ENTITIES
+from custom_components.email_ha.imap_client import ImapClientError
 from homeassistant.config_entries import SOURCE_REAUTH
 from homeassistant.helpers.entity_registry import RegistryEntryDisabler
 
@@ -384,3 +385,297 @@ def test_custom_sensor_add_edit_duplicate_delete_state() -> None:
             "id": "two",
         }
     ]
+
+
+def _options_flow(options: dict[str, Any]) -> tuple[EmailHAOptionsFlow, Any]:
+    """Return a lightweight options flow bound to one in-memory entry."""
+    entry = SimpleNamespace(entry_id="entry-1", options=options)
+    flow = EmailHAOptionsFlow()
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_get_known_entry=Mock(return_value=entry))
+    )
+    flow.handler = "entry-1"
+    flow.async_show_form = Mock(side_effect=lambda **kwargs: {"type": "form", **kwargs})
+    flow.async_create_entry = Mock(return_value={"type": "create_entry"})
+    return flow, entry
+
+
+@pytest.mark.asyncio
+async def test_logical_watch_selection_leads_to_small_action_flow() -> None:
+    """The item list contains one watch entry, then shows its own actions."""
+    flow, _entry = _options_flow(
+        {
+            "email_watches": [
+                {"id": "watch-1", "name": "RSA", "folder": "INBOX", "filters": {}}
+            ]
+        }
+    )
+
+    result = cast(
+        dict[str, Any],
+        await flow.async_step_email_watches({"manage_action": "manage:watch-1"}),
+    )
+
+    assert result["step_id"] == "email_watch_action"
+    assert flow._watch_id == "watch-1"  # noqa: SLF001
+    action_schema = result["data_schema"]
+    assert action_schema({"action": "disable"})["action"] == "disable"
+
+
+@pytest.mark.asyncio
+async def test_logical_sensor_selection_leads_to_small_action_flow() -> None:
+    """Custom sensors likewise expose one list item followed by three actions."""
+    flow, _entry = _options_flow(
+        {
+            "custom_sensors": [
+                {
+                    "id": "sensor-1",
+                    "name": "Bookings",
+                    "folder": "INBOX",
+                    "filters": {},
+                }
+            ]
+        }
+    )
+
+    result = cast(
+        dict[str, Any],
+        await flow.async_step_custom_sensors({"manage_action": "manage:sensor-1"}),
+    )
+
+    assert result["step_id"] == "custom_sensor_action"
+    assert flow._custom_id == "sensor-1"  # noqa: SLF001
+    action_schema = result["data_schema"]
+    assert action_schema({"action": "duplicate"})["action"] == "duplicate"
+
+
+@pytest.mark.asyncio
+async def test_enable_disable_action_retains_watch_id_and_legacy_defaults() -> None:
+    """Missing enabled is treated as on and pausing only changes that state."""
+    flow, _entry = _options_flow(
+        {
+            "email_watches": [
+                {"id": "watch-1", "name": "RSA", "folder": "INBOX", "filters": {}}
+            ]
+        }
+    )
+    await flow.async_step_email_watches({"manage_action": "manage:watch-1"})
+
+    await flow.async_step_email_watch_action({"action": "disable"})
+
+    saved = flow.async_create_entry.call_args.kwargs["data"]["email_watches"]
+    assert saved == [
+        {
+            "id": "watch-1",
+            "name": "RSA",
+            "folder": "INBOX",
+            "filters": {},
+            "enabled": False,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_common_preview_is_bounded_body_free_and_does_not_persist(
+    monkeypatch,
+) -> None:
+    """Testing a common-only draft searches five headers without saving state."""
+    flow, _entry = _options_flow({"custom_sensors": []})
+    coordinator = SimpleNamespace(
+        async_preview_filter=AsyncMock(
+            return_value=[
+                {
+                    "subject": "Match",
+                    "sender": {"address": "sender@example.com"},
+                    "date": "2026-08-26T10:00:00+00:00",
+                    "body": "must not be rendered",
+                }
+            ]
+        )
+    )
+    monkeypatch.setattr(
+        "custom_components.email_ha.config_flow.coordinator_from_entry",
+        Mock(return_value=coordinator),
+    )
+    flow._custom_mode = "add"  # noqa: SLF001
+
+    result = cast(
+        dict[str, Any],
+        await flow.async_step_custom_sensor_common(
+            {
+                "name": "RSA",
+                "folder": "INBOX",
+                "from": "rsa.ie",
+                "read_state": "any",
+                "gmail_category": "any",
+                "important_state": "any",
+                "starred_state": "any",
+                "attachment_state": "any",
+                "more_filters": False,
+                "test_filter": True,
+            }
+        ),
+    )
+
+    coordinator.async_preview_filter.assert_awaited_once_with(
+        "INBOX", {"from": "rsa.ie"}, 5
+    )
+    assert result["step_id"] == "custom_sensor_preview"
+    assert "up to 5" in result["description_placeholders"]["preview"]
+    assert "must not be rendered" not in result["description_placeholders"]["preview"]
+    flow.async_create_entry.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_zero_match_preview_is_successful_and_preserves_baseline(
+    monkeypatch,
+) -> None:
+    """Zero results are informative and testing never touches arrival state."""
+    flow, _entry = _options_flow({"email_watches": []})
+    coordinator = SimpleNamespace(
+        async_preview_filter=AsyncMock(return_value=[]),
+        _last_seen_uid=42,
+        _folder_uid_state={"INBOX": (7, 42)},
+    )
+    monkeypatch.setattr(
+        "custom_components.email_ha.config_flow.coordinator_from_entry",
+        Mock(return_value=coordinator),
+    )
+    flow._watch_mode = "add"  # noqa: SLF001
+
+    result = cast(
+        dict[str, Any],
+        await flow.async_step_email_watch_common(
+            {
+                "name": "No matches",
+                "folder": "INBOX",
+                "subject": "missing",
+                "read_state": "any",
+                "gmail_category": "any",
+                "important_state": "any",
+                "starred_state": "any",
+                "attachment_state": "any",
+                "more_filters": False,
+                "test_filter": True,
+                "enabled": True,
+            }
+        ),
+    )
+
+    assert "No matching emails" in result["description_placeholders"]["preview"]
+    assert coordinator._last_seen_uid == 42  # noqa: SLF001
+    assert coordinator._folder_uid_state == {"INBOX": (7, 42)}  # noqa: SLF001
+    flow.async_create_entry.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_preview_failure_keeps_draft_and_shows_clear_error(monkeypatch) -> None:
+    """A Gmail failure returns a form error without discarding owner input."""
+    flow, _entry = _options_flow({"custom_sensors": []})
+    coordinator = SimpleNamespace(
+        async_preview_filter=AsyncMock(side_effect=ImapClientError("offline"))
+    )
+    monkeypatch.setattr(
+        "custom_components.email_ha.config_flow.coordinator_from_entry",
+        Mock(return_value=coordinator),
+    )
+    flow._custom_mode = "add"  # noqa: SLF001
+
+    result = cast(
+        dict[str, Any],
+        await flow.async_step_custom_sensor_common(
+            {
+                "name": "Retained",
+                "folder": "INBOX",
+                "from": "sender.example",
+                "read_state": "any",
+                "gmail_category": "any",
+                "important_state": "any",
+                "starred_state": "any",
+                "attachment_state": "any",
+                "more_filters": False,
+                "test_filter": True,
+            }
+        ),
+    )
+
+    assert result["errors"] == {"base": "filter_test_failed"}
+    assert flow._custom_draft["name"] == "Retained"  # noqa: SLF001
+    assert flow._custom_draft["filters"] == {  # noqa: SLF001
+        "from": "sender.example"
+    }
+    flow.async_create_entry.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_edit_preview_save_retains_persistent_id(monkeypatch) -> None:
+    """Testing an edited watch never turns it into a newly identified copy."""
+    original = {
+        "id": "watch-1",
+        "name": "RSA",
+        "folder": "INBOX",
+        "filters": {"from": "rsa.ie"},
+    }
+    flow, _entry = _options_flow({"email_watches": [original]})
+    coordinator = SimpleNamespace(async_preview_filter=AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        "custom_components.email_ha.config_flow.coordinator_from_entry",
+        Mock(return_value=coordinator),
+    )
+    flow._watch_mode = "edit"  # noqa: SLF001
+    flow._watch_id = "watch-1"  # noqa: SLF001
+    flow._watch_draft = dict(original)  # noqa: SLF001
+
+    await flow.async_step_email_watch_preview()
+    await flow.async_step_email_watch_preview({"save": True})
+
+    saved = flow.async_create_entry.call_args.kwargs["data"]["email_watches"]
+    assert len(saved) == 1
+    assert saved[0]["id"] == "watch-1"
+
+
+@pytest.mark.asyncio
+async def test_advanced_preview_uses_complete_retained_draft() -> None:
+    """Advanced fields are captured before preview and survive returning to edit."""
+    flow, _entry = _options_flow({"custom_sensors": []})
+    flow._custom_mode = "add"  # noqa: SLF001
+    flow.async_step_custom_sensor_advanced = AsyncMock(
+        return_value={"type": "form", "step_id": "custom_sensor_advanced"}
+    )
+
+    common = cast(
+        dict[str, Any],
+        await flow.async_step_custom_sensor_common(
+            {
+                "name": "RSA",
+                "folder": "INBOX",
+                "from": "rsa.ie",
+                "read_state": "any",
+                "gmail_category": "any",
+                "important_state": "any",
+                "starred_state": "any",
+                "attachment_state": "any",
+                "more_filters": True,
+                "test_filter": True,
+            }
+        ),
+    )
+
+    assert common["step_id"] == "custom_sensor_advanced"
+    flow.async_step_custom_sensor_preview = AsyncMock(
+        return_value={"type": "form", "step_id": "custom_sensor_preview"}
+    )
+    preview = cast(
+        dict[str, Any],
+        await EmailHAOptionsFlow.async_step_custom_sensor_advanced(
+            flow, {"body": "renewal", "since": "2026-01-01", "test_filter": True}
+        ),
+    )
+
+    assert preview["step_id"] == "custom_sensor_preview"
+    assert flow._custom_draft["filters"] == {  # noqa: SLF001
+        "from": "rsa.ie",
+        "body": "renewal",
+        "since": "2026-01-01",
+    }
+    flow.async_step_custom_sensor_preview.assert_awaited_once()

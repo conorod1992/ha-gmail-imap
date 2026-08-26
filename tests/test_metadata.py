@@ -31,7 +31,7 @@ def test_every_fixed_entity_uses_a_translation_key() -> None:
         definition.key
         for definition in GMAIL_ENTITY_DEFINITIONS
         if definition.platform == "sensor"
-    }
+    } | {"connection_status", "last_successful_update"}
     expected_events = {
         definition.key
         for definition in GMAIL_ENTITY_DEFINITIONS
@@ -62,5 +62,5 @@ def test_action_translation_and_yaml_surfaces_match() -> None:
 
 def test_breaking_redesign_has_matching_release_metadata() -> None:
     """The clean first public API is released as 2.0 with current HA minimum."""
-    assert _json(_INTEGRATION / "manifest.json")["version"] == "2.1.0"
+    assert _json(_INTEGRATION / "manifest.json")["version"] == "2.2.0"
     assert _json(_ROOT / "hacs.json")["homeassistant"] == "2026.7.0"

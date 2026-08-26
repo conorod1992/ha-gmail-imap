@@ -10,6 +10,7 @@ from custom_components.email_ha.search import (
     build_structured_search_tokens,
     normalize_structured_filters,
     quote_imap_search_value,
+    summarize_structured_filters,
 )
 
 
@@ -144,3 +145,65 @@ def test_attachment_filename_rejects_command_controls(value: str) -> None:
     """Filename input retains the shared IMAP injection protections."""
     with pytest.raises(ValueError, match="control characters"):
         build_structured_search_tokens({"attachment_filename": value})
+
+
+def test_full_summary_includes_every_supported_filter_in_plain_language() -> None:
+    """The deterministic full summary never drops an active rule condition."""
+    summary = summarize_structured_filters(
+        {
+            "from": "sender.example",
+            "to": "home@example.com",
+            "cc": "accounts@example.com",
+            "subject": "renewal",
+            "body": "reference",
+            "text": "Dublin",
+            "read_state": "unread",
+            "gmail_category": "primary",
+            "important_state": "not_important",
+            "starred_state": "not_starred",
+            "attachment_state": "has_attachment",
+            "attachment_filename": "invoice.pdf",
+            "since": "2026-01-01",
+            "before": "2026-12-31",
+            "on": "2026-08-26",
+        },
+        folder="INBOX",
+    )
+
+    for expected in (
+        "Inbox",
+        "Unread",
+        "Category Primary",
+        "Not important",
+        "Not starred",
+        "Has attachment",
+        'From contains "sender.example"',
+        'To contains "home@example.com"',
+        'Cc contains "accounts@example.com"',
+        'Subject contains "renewal"',
+        'Body contains "reference"',
+        'Text contains "Dublin"',
+        'Attachment name contains "invoice.pdf"',
+        "Since 2026-01-01",
+        "Before 2026-12-31",
+        "On 2026-08-26",
+    ):
+        assert expected in summary
+    assert "not_starred" not in summary
+    assert "not_important" not in summary
+
+
+def test_short_summary_truncates_without_changing_full_summary() -> None:
+    """List labels stay compact while the full representation remains complete."""
+    filters = {
+        "from": "one",
+        "to": "two",
+        "subject": "three",
+        "body": "four",
+        "text": "five",
+    }
+
+    assert "+2 more" in summarize_structured_filters(
+        filters, folder="INBOX", short=True
+    )
+    assert "+" not in summarize_structured_filters(filters, folder="INBOX")

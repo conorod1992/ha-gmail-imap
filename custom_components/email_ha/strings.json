@@ -81,7 +81,7 @@
       },
       "custom_sensor_common": {
         "title": "Custom email sensor",
-        "description": "Only the number of matching emails is retrieved. Matching is performed by Gmail; message contents are not downloaded for this sensor. Only filled filters are used, and all filled conditions must match.",
+        "description": "Only the number of matching emails is retrieved. Matching is performed by Gmail; message contents are not downloaded for this sensor. Only filled filters are used, and all filled conditions must match. Current rule: {summary}.",
         "data": {
           "name": "Name",
           "folder": "Folder",
@@ -92,7 +92,8 @@
           "important_state": "Gmail importance",
           "starred_state": "Starred state",
           "attachment_state": "Attachment",
-          "more_filters": "Add more filters"
+          "more_filters": "Add more filters",
+          "test_filter": "Test filter"
         },
         "data_description": {
           "name": "A clear entity name, such as RSA unread or Bookings.",
@@ -104,7 +105,7 @@
       },
       "custom_sensor_advanced": {
         "title": "More custom sensor filters",
-        "description": "These optional conditions are also combined with AND. Body and text matching happen on Gmail's server without downloading message bodies into Home Assistant.",
+        "description": "These optional conditions are also combined with AND. Body and text matching happen on Gmail's server without downloading message bodies into Home Assistant. Current rule: {summary}.",
         "data": {
           "to": "To contains",
           "cc": "CC contains",
@@ -113,8 +114,19 @@
           "attachment_filename": "Attachment filename contains",
           "since": "Since",
           "before": "Before",
-          "on": "On"
+          "on": "On",
+          "test_filter": "Test filter"
         }
+      },
+      "custom_sensor_action": {
+        "title": "Manage custom email sensor",
+        "description": "Choose what to do with this sensor.",
+        "data": {"action": "Action"}
+      },
+      "custom_sensor_preview": {
+        "title": "Filter preview",
+        "description": "{preview}",
+        "data": {"save": "Save this sensor"}
       },
       "delete_custom_sensor": {
         "title": "Delete {name}?",
@@ -125,15 +137,25 @@
       },
       "email_watch_common": {
         "title": "Email watch",
-        "description": "Fires an event when Email HA observes a newly arriving message that matches every filled filter. Existing mail is not replayed and message bodies are not included.",
+        "description": "Fires an event when Email HA observes a newly arriving message that matches every filled filter. Existing mail is not replayed and message bodies are not included. Current rule: {summary}.",
         "data": {
-          "name": "Name", "folder": "Folder", "from": "From contains", "subject": "Subject contains", "read_state": "Read state", "gmail_category": "Gmail category", "important_state": "Gmail importance", "starred_state": "Starred state", "attachment_state": "Attachment", "more_filters": "Add more filters"
+          "name": "Name", "folder": "Folder", "from": "From contains", "subject": "Subject contains", "read_state": "Read state", "gmail_category": "Gmail category", "important_state": "Gmail importance", "starred_state": "Starred state", "attachment_state": "Attachment", "more_filters": "Add more filters", "test_filter": "Test filter", "enabled": "Enabled"
         }
       },
       "email_watch_advanced": {
         "title": "More email watch filters",
-        "description": "These optional conditions are combined with AND and checked only against newly detected messages.",
-        "data": {"to": "To contains", "cc": "CC contains", "body": "Body contains", "text": "Any text contains", "attachment_filename": "Attachment filename contains", "since": "Since", "before": "Before", "on": "On"}
+        "description": "These optional conditions are combined with AND and checked only against newly detected messages. Current rule: {summary}.",
+        "data": {"to": "To contains", "cc": "CC contains", "body": "Body contains", "text": "Any text contains", "attachment_filename": "Attachment filename contains", "since": "Since", "before": "Before", "on": "On", "test_filter": "Test filter"}
+      },
+      "email_watch_action": {
+        "title": "Manage email watch",
+        "description": "Choose what to do with this watch.",
+        "data": {"action": "Action"}
+      },
+      "email_watch_preview": {
+        "title": "Filter preview",
+        "description": "{preview}",
+        "data": {"save": "Save this watch"}
       },
       "delete_email_watch": {
         "title": "Delete {name}?",
@@ -154,7 +176,8 @@
     "error": {
       "invalid_custom_sensor": "Check the name, folder, filters, and dates. Control characters are not allowed.",
       "invalid_email_watch": "Check the name, folder, filters, and dates. Control characters are not allowed.",
-      "invalid_folder": "Choose a non-empty folder without control characters."
+      "invalid_folder": "Choose a non-empty folder without control characters.",
+      "filter_test_failed": "Email HA could not test this filter. Check the Gmail connection and try again. Your draft was kept."
     },
     "abort": {
       "too_many_custom_sensors": "The maximum of 20 custom email sensors has been reached.",
@@ -196,6 +219,9 @@
     },
     "gmail_category": {
       "options": {"any": "Any", "primary": "Primary", "updates": "Updates", "promotions": "Promotions", "social": "Social", "forums": "Forums"}
+    },
+    "manage_action": {
+      "options": {"edit": "Edit", "duplicate": "Duplicate", "delete": "Delete", "enable": "Enable", "disable": "Disable"}
     }
   },
   "entity": {
@@ -213,7 +239,9 @@
       "forums_unread": {"name": "Forums unread"},
       "inbox_messages": {"name": "Inbox messages"},
       "mailbox_folders": {"name": "Mailbox folders"},
-      "latest_email": {"name": "Latest email"}
+      "latest_email": {"name": "Latest email"},
+      "connection_status": {"name": "Connection status"},
+      "last_successful_update": {"name": "Last successful update"}
     }
   },
   "services": {

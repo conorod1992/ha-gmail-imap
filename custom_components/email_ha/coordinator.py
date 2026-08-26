@@ -120,6 +120,21 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         """Return the folder used by Latest email and New email."""
         return self._folder
 
+    @property
+    def idle_running(self) -> bool:
+        """Return whether the account's IDLE task is currently alive."""
+        return self._idle_task is not None and not self._idle_task.done()
+
+    @property
+    def cached_folder_count(self) -> int:
+        """Return the number of folders discovered during the last refresh."""
+        return len(self._cached_folders)
+
+    @property
+    def event_baseline_ready(self) -> bool:
+        """Return whether new-email UID baselines are established."""
+        return self._event_baseline_ready
+
     @callback
     def async_add_new_email_listener(
         self, listener: Callable[[dict[str, Any]], None]
@@ -172,6 +187,18 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             ) from err
         raw = self.oauth_session.token["access_token"]
         return raw.decode() if isinstance(raw, bytes) else str(raw)
+
+    async def async_preview_filter(
+        self, folder: str, filters: dict[str, Any], limit: int = 5
+    ) -> list[dict[str, Any]]:
+        """Run a bounded, body-free draft search without touching coordinator state."""
+        tokens = build_structured_search_tokens(filters)
+        access_token = await self._async_ensure_fresh_token()
+        async with ImapClient(self._imap_host, self._imap_port) as client:
+            await client.connect(self._email, access_token)
+            return await client.search_emails_tokens(
+                folder, tokens, limit, include_body=False
+            )
 
     async def _async_detect_new_emails(
         self, client: ImapClient, status: dict[str, int]
@@ -270,6 +297,8 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             *((sensor, False) for sensor in self.custom_sensors),
             *((watch, True) for watch in self.email_watches),
         ):
+            if is_watch and not definition.get("enabled", True):
+                continue
             definition_id = str(definition.get("id", ""))
             folder = str(definition.get("folder", DEFAULT_FOLDER))
             if not definition_id or not arrivals.get(folder):
@@ -337,9 +366,19 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             count, newest_uid = await client.count_emails(DEFAULT_FOLDER, tokens)
             gmail_counts[definition.key] = SearchCountData(count, newest_uid)
 
+        # All watch folders remain baseline-tracked while paused so re-enabling
+        # cannot replay mail that arrived during the pause. Only active filters
+        # cause header fetching or matching searches.
         tracked_definitions = [*self.custom_sensors, *self.email_watches]
         tracked_folders = {
             str(item.get("folder", DEFAULT_FOLDER)) for item in tracked_definitions
+        }
+        active_filtered_folders = {
+            str(item.get("folder", DEFAULT_FOLDER))
+            for item in (
+                *self.custom_sensors,
+                *(watch for watch in self.email_watches if watch.get("enabled", True)),
+            )
         }
         folder_statuses = {self._folder: monitored_status}
         for folder in tracked_folders - {self._folder}:
@@ -348,7 +387,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
 
         arrivals: dict[str, list[dict[str, Any]]] = {}
         for folder, status in folder_statuses.items():
-            needs_filtered_messages = folder in tracked_folders
+            needs_filtered_messages = folder in active_filtered_folders
             if folder == self._folder:
                 # Maintain the established generic-event baseline for compatibility.
                 generic_messages = await self._async_detect_new_emails(client, status)
@@ -443,7 +482,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         definitions = {str(watch.get("id", "")): watch for watch in self.email_watches}
         for watch_id, message in matches:
             watch = definitions.get(watch_id)
-            if watch is None:
+            if watch is None or not watch.get("enabled", True):
                 continue
             sender = message.get("sender") or {}
             payload = {

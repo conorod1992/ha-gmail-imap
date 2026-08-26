@@ -6,7 +6,11 @@ from datetime import datetime, timezone
 import logging
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -49,6 +53,12 @@ async def async_setup_entry(
     entities.extend(
         CustomEmailCountSensor(coordinator, entry, sensor)
         for sensor in entry.options.get(CONF_CUSTOM_SENSORS, [])
+    )
+    entities.extend(
+        [
+            ConnectionStatusSensor(coordinator, entry),
+            LastSuccessfulUpdateSensor(coordinator, entry),
+        ]
     )
     async_add_entities(entities)
 
@@ -202,3 +212,54 @@ class CustomEmailCountSensor(_BaseEmailSensor):
             "newest_matching_date": result.newest_date if result else None,
             "last_new_match": result.last_new_match if result else None,
         }
+
+
+class ConnectionStatusSensor(_BaseEmailSensor):
+    """A disabled-by-default, actionable account health indicator."""
+
+    _attr_translation_key = "connection_status"
+    _attr_entity_registry_enabled_default = False
+    _attr_icon = "mdi:email-check-outline"
+
+    def __init__(
+        self, coordinator: EmailDataUpdateCoordinator, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator, entry, "connection_status")
+
+    @property
+    def available(self) -> bool:
+        """Health state must remain visible while the coordinator exists."""
+        return True
+
+    @property
+    def native_value(self) -> str:
+        timestamp = self.coordinator.last_success_time
+        fresh = (
+            timestamp is not None
+            and (datetime.now(timezone.utc) - timestamp).total_seconds()
+            <= UNAVAILABLE_AFTER_SECONDS
+        )
+        return "Healthy" if self.coordinator.last_update_success and fresh else "Stale"
+
+
+class LastSuccessfulUpdateSensor(_BaseEmailSensor):
+    """A disabled-by-default timestamp for diagnosing stale connections."""
+
+    _attr_translation_key = "last_successful_update"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_registry_enabled_default = False
+    _attr_icon = "mdi:clock-check-outline"
+
+    def __init__(
+        self, coordinator: EmailDataUpdateCoordinator, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator, entry, "last_successful_update")
+
+    @property
+    def available(self) -> bool:
+        """Retain the last known timestamp while Gmail is unavailable."""
+        return True
+
+    @property
+    def native_value(self) -> datetime | None:
+        return self.coordinator.last_success_time

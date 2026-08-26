@@ -256,6 +256,70 @@ async def test_nonmatching_arrival_updates_neither_watch_nor_sensor() -> None:
 
 
 @pytest.mark.asyncio
+async def test_disabled_watch_skips_matching_and_emission() -> None:
+    """A legacy-compatible disabled watch performs no filter search or event."""
+    coordinator = _coordinator()
+    coordinator.email_watches = [
+        {
+            "id": "paused",
+            "name": "Paused",
+            "folder": "INBOX",
+            "enabled": False,
+            "filters": {"from": "private.example"},
+        }
+    ]
+    received: list[dict] = []
+    coordinator.async_add_watch_listener("paused", received.append)
+    client = AsyncMock()
+
+    matches = await coordinator._async_match_new_messages(  # noqa: SLF001
+        client, {"INBOX": [_message("44")]}
+    )
+    coordinator._notify_watch_matches([("paused", _message("44"))])  # noqa: SLF001
+
+    assert matches == []
+    assert received == []
+    client.matching_uids.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_paused_folder_baseline_prevents_replay_after_enable() -> None:
+    """Paused mail advances the UID baseline; only later mail fires after resume."""
+    coordinator = _coordinator()
+    client = AsyncMock()
+    await coordinator._async_detect_folder_new_emails(  # noqa: SLF001
+        client,
+        "Receipts",
+        {"uidvalidity": 9, "uidnext": 101},
+        fetch_messages=False,
+    )
+    await coordinator._async_detect_folder_new_emails(  # noqa: SLF001
+        client,
+        "Receipts",
+        {"uidvalidity": 9, "uidnext": 104},
+        fetch_messages=False,
+    )
+
+    replay = await coordinator._async_detect_folder_new_emails(  # noqa: SLF001
+        client,
+        "Receipts",
+        {"uidvalidity": 9, "uidnext": 104},
+        fetch_messages=True,
+    )
+    client.get_new_emails.return_value = ([_message("104")], 1)
+    future = await coordinator._async_detect_folder_new_emails(  # noqa: SLF001
+        client,
+        "Receipts",
+        {"uidvalidity": 9, "uidnext": 105},
+        fetch_messages=True,
+    )
+
+    assert replay == []
+    assert [message["uid"] for message in future] == ["104"]
+    client.get_new_emails.assert_awaited_once_with("Receipts", 103, 25)
+
+
+@pytest.mark.asyncio
 async def test_matching_results_map_only_to_arrival_metadata() -> None:
     """A server response cannot introduce a historical UID outside the arrival set."""
     coordinator = _coordinator()

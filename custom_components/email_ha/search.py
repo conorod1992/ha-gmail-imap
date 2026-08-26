@@ -38,6 +38,53 @@ IMPORTANT_STATES = ("any", "important", "not_important")
 ATTACHMENT_STATES = ("any", "has_attachment", "no_attachment")
 
 
+def summarize_structured_filters(
+    filters: Mapping[str, Any], *, folder: str | None = None, short: bool = False
+) -> str:
+    """Return a concise owner-facing description of every active filter."""
+    normalized = normalize_structured_filters(filters)
+    details: list[str] = []
+    if folder:
+        details.append("Inbox" if folder.upper() == "INBOX" else folder)
+    labels = {
+        "from": "From contains",
+        "to": "To contains",
+        "cc": "Cc contains",
+        "subject": "Subject contains",
+        "body": "Body contains",
+        "text": "Text contains",
+        "attachment_filename": "Attachment name contains",
+        "since": "Since",
+        "before": "Before",
+        "on": "On",
+    }
+    states = {
+        "read_state": {"unread": "Unread", "read": "Read"},
+        "gmail_category": {
+            value: f"Category {value.title()}" for value in GMAIL_CATEGORIES
+        },
+        "important_state": {"important": "Important", "not_important": "Not important"},
+        "starred_state": {"starred": "Starred", "not_starred": "Not starred"},
+        "attachment_state": {
+            "has_attachment": "Has attachment",
+            "no_attachment": "No attachment",
+        },
+    }
+    details.extend(
+        states[field][value] for field in states if (value := normalized.get(field))
+    )
+    details.extend(
+        f"{label} {value}" if field in _DATE_FILTERS else f'{label} "{value}"'
+        for field, label in labels.items()
+        if (value := normalized.get(field))
+    )
+    if not details:
+        return "All email"
+    if short and len(details) > 4:
+        return " · ".join(details[:4]) + f" · +{len(details) - 4} more"
+    return " · ".join(details)
+
+
 def validate_imap_folder(value: Any) -> str:
     """Return a non-empty folder name without IMAP command controls."""
     folder = _clean_text(value, "Folder")
