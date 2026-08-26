@@ -411,7 +411,10 @@ async def test_logical_watch_selection_leads_to_small_action_flow() -> None:
         }
     )
 
-    result = await flow.async_step_email_watches({"manage_action": "manage:watch-1"})
+    result = cast(
+        dict[str, Any],
+        await flow.async_step_email_watches({"manage_action": "manage:watch-1"}),
+    )
 
     assert result["step_id"] == "email_watch_action"
     assert flow._watch_id == "watch-1"  # noqa: SLF001
@@ -435,7 +438,10 @@ async def test_logical_sensor_selection_leads_to_small_action_flow() -> None:
         }
     )
 
-    result = await flow.async_step_custom_sensors({"manage_action": "manage:sensor-1"})
+    result = cast(
+        dict[str, Any],
+        await flow.async_step_custom_sensors({"manage_action": "manage:sensor-1"}),
+    )
 
     assert result["step_id"] == "custom_sensor_action"
     assert flow._custom_id == "sensor-1"  # noqa: SLF001
@@ -493,19 +499,22 @@ async def test_common_preview_is_bounded_body_free_and_does_not_persist(
     )
     flow._custom_mode = "add"  # noqa: SLF001
 
-    result = await flow.async_step_custom_sensor_common(
-        {
-            "name": "RSA",
-            "folder": "INBOX",
-            "from": "rsa.ie",
-            "read_state": "any",
-            "gmail_category": "any",
-            "important_state": "any",
-            "starred_state": "any",
-            "attachment_state": "any",
-            "more_filters": False,
-            "test_filter": True,
-        }
+    result = cast(
+        dict[str, Any],
+        await flow.async_step_custom_sensor_common(
+            {
+                "name": "RSA",
+                "folder": "INBOX",
+                "from": "rsa.ie",
+                "read_state": "any",
+                "gmail_category": "any",
+                "important_state": "any",
+                "starred_state": "any",
+                "attachment_state": "any",
+                "more_filters": False,
+                "test_filter": True,
+            }
+        ),
     )
 
     coordinator.async_preview_filter.assert_awaited_once_with(
@@ -534,20 +543,23 @@ async def test_zero_match_preview_is_successful_and_preserves_baseline(
     )
     flow._watch_mode = "add"  # noqa: SLF001
 
-    result = await flow.async_step_email_watch_common(
-        {
-            "name": "No matches",
-            "folder": "INBOX",
-            "subject": "missing",
-            "read_state": "any",
-            "gmail_category": "any",
-            "important_state": "any",
-            "starred_state": "any",
-            "attachment_state": "any",
-            "more_filters": False,
-            "test_filter": True,
-            "enabled": True,
-        }
+    result = cast(
+        dict[str, Any],
+        await flow.async_step_email_watch_common(
+            {
+                "name": "No matches",
+                "folder": "INBOX",
+                "subject": "missing",
+                "read_state": "any",
+                "gmail_category": "any",
+                "important_state": "any",
+                "starred_state": "any",
+                "attachment_state": "any",
+                "more_filters": False,
+                "test_filter": True,
+                "enabled": True,
+            }
+        ),
     )
 
     assert "No matching emails" in result["description_placeholders"]["preview"]
@@ -569,19 +581,22 @@ async def test_preview_failure_keeps_draft_and_shows_clear_error(monkeypatch) ->
     )
     flow._custom_mode = "add"  # noqa: SLF001
 
-    result = await flow.async_step_custom_sensor_common(
-        {
-            "name": "Retained",
-            "folder": "INBOX",
-            "from": "sender.example",
-            "read_state": "any",
-            "gmail_category": "any",
-            "important_state": "any",
-            "starred_state": "any",
-            "attachment_state": "any",
-            "more_filters": False,
-            "test_filter": True,
-        }
+    result = cast(
+        dict[str, Any],
+        await flow.async_step_custom_sensor_common(
+            {
+                "name": "Retained",
+                "folder": "INBOX",
+                "from": "sender.example",
+                "read_state": "any",
+                "gmail_category": "any",
+                "important_state": "any",
+                "starred_state": "any",
+                "attachment_state": "any",
+                "more_filters": False,
+                "test_filter": True,
+            }
+        ),
     )
 
     assert result["errors"] == {"base": "filter_test_failed"}
@@ -628,27 +643,33 @@ async def test_advanced_preview_uses_complete_retained_draft() -> None:
         return_value={"type": "form", "step_id": "custom_sensor_advanced"}
     )
 
-    common = await flow.async_step_custom_sensor_common(
-        {
-            "name": "RSA",
-            "folder": "INBOX",
-            "from": "rsa.ie",
-            "read_state": "any",
-            "gmail_category": "any",
-            "important_state": "any",
-            "starred_state": "any",
-            "attachment_state": "any",
-            "more_filters": True,
-            "test_filter": True,
-        }
+    common = cast(
+        dict[str, Any],
+        await flow.async_step_custom_sensor_common(
+            {
+                "name": "RSA",
+                "folder": "INBOX",
+                "from": "rsa.ie",
+                "read_state": "any",
+                "gmail_category": "any",
+                "important_state": "any",
+                "starred_state": "any",
+                "attachment_state": "any",
+                "more_filters": True,
+                "test_filter": True,
+            }
+        ),
     )
 
     assert common["step_id"] == "custom_sensor_advanced"
     flow.async_step_custom_sensor_preview = AsyncMock(
         return_value={"type": "form", "step_id": "custom_sensor_preview"}
     )
-    preview = await EmailHAOptionsFlow.async_step_custom_sensor_advanced(
-        flow, {"body": "renewal", "since": "2026-01-01", "test_filter": True}
+    preview = cast(
+        dict[str, Any],
+        await EmailHAOptionsFlow.async_step_custom_sensor_advanced(
+            flow, {"body": "renewal", "since": "2026-01-01", "test_filter": True}
+        ),
     )
 
     assert preview["step_id"] == "custom_sensor_preview"

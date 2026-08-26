@@ -47,7 +47,9 @@ def test_health_sensors_remain_available_and_use_freshness() -> None:
     assert status.native_value == "Healthy"
     assert timestamp.available is True
     assert timestamp.native_value == recent
-    assert timestamp.device_class.value == "timestamp"
+    device_class = timestamp.device_class
+    assert device_class is not None
+    assert device_class.value == "timestamp"
 
     coordinator.last_update_success = False
     assert status.native_value == "Stale"
