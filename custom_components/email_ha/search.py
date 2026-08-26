@@ -47,24 +47,37 @@ def summarize_structured_filters(
     if folder:
         details.append("Inbox" if folder.upper() == "INBOX" else folder)
     labels = {
-        "from": "From contains", "to": "To contains", "cc": "Cc contains",
-        "subject": "Subject contains", "body": "Body contains", "text": "Text contains",
-        "attachment_filename": "Attachment name contains", "since": "Since",
-        "before": "Before", "on": "On",
+        "from": "From contains",
+        "to": "To contains",
+        "cc": "Cc contains",
+        "subject": "Subject contains",
+        "body": "Body contains",
+        "text": "Text contains",
+        "attachment_filename": "Attachment name contains",
+        "since": "Since",
+        "before": "Before",
+        "on": "On",
     }
     states = {
         "read_state": {"unread": "Unread", "read": "Read"},
-        "gmail_category": {value: f"Category {value.title()}" for value in GMAIL_CATEGORIES},
+        "gmail_category": {
+            value: f"Category {value.title()}" for value in GMAIL_CATEGORIES
+        },
         "important_state": {"important": "Important", "not_important": "Not important"},
         "starred_state": {"starred": "Starred", "not_starred": "Not starred"},
-        "attachment_state": {"has_attachment": "Has attachment", "no_attachment": "No attachment"},
+        "attachment_state": {
+            "has_attachment": "Has attachment",
+            "no_attachment": "No attachment",
+        },
     }
-    for field in states:
-        if value := normalized.get(field):
-            details.append(states[field][value])
-    for field in labels:
-        if value := normalized.get(field):
-            details.append(f"{labels[field]} {value}" if field in _DATE_FILTERS else f'{labels[field]} "{value}"')
+    details.extend(
+        states[field][value] for field in states if (value := normalized.get(field))
+    )
+    details.extend(
+        f"{label} {value}" if field in _DATE_FILTERS else f'{label} "{value}"'
+        for field, label in labels.items()
+        if (value := normalized.get(field))
+    )
     if not details:
         return "All email"
     if short and len(details) > 4:

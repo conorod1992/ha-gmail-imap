@@ -8,7 +8,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.loader import async_get_integration
 
-from .const import CONF_CUSTOM_SENSORS, CONF_EMAIL, CONF_EMAIL_WATCHES, CONF_MONITORED_FOLDER
+from .const import (
+    CONF_CUSTOM_SENSORS,
+    CONF_EMAIL,
+    CONF_EMAIL_WATCHES,
+    CONF_MONITORED_FOLDER,
+)
 from .coordinator import coordinator_from_entry
 
 
@@ -29,18 +34,27 @@ async def async_get_config_entry_diagnostics(
         "integration_version": integration.version,
         "account": _redact_email(str(entry.data.get(CONF_EMAIL, ""))),
         "monitored_folder": entry.options.get(CONF_MONITORED_FOLDER, "INBOX"),
-        "enabled_gmail_entities": sorted(coordinator.enabled_gmail_entities) if coordinator else [],
+        "enabled_gmail_entities": sorted(coordinator.enabled_gmail_entities)
+        if coordinator
+        else [],
         "custom_sensor_count": len(entry.options.get(CONF_CUSTOM_SENSORS, [])),
         "email_watch_count": len(watches),
         "enabled_watch_count": sum(watch.get("enabled", True) for watch in watches),
-        "disabled_watch_count": sum(not watch.get("enabled", True) for watch in watches),
+        "disabled_watch_count": sum(
+            not watch.get("enabled", True) for watch in watches
+        ),
         "last_successful_update": getattr(coordinator, "last_success_time", None),
         "idle_running": coordinator.idle_running if coordinator else False,
         "cached_folder_count": coordinator.cached_folder_count if coordinator else 0,
-        "coordinator_last_update_success": getattr(coordinator, "last_update_success", None),
+        "coordinator_last_update_success": getattr(
+            coordinator, "last_update_success", None
+        ),
         "coordinator_last_exception": (
             type(getattr(coordinator, "last_exception", None)).__name__
-            if getattr(coordinator, "last_exception", None) else None
+            if getattr(coordinator, "last_exception", None)
+            else None
         ),
-        "event_baseline_ready": coordinator.event_baseline_ready if coordinator else False,
+        "event_baseline_ready": coordinator.event_baseline_ready
+        if coordinator
+        else False,
     }

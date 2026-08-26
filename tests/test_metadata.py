@@ -31,7 +31,7 @@ def test_every_fixed_entity_uses_a_translation_key() -> None:
         definition.key
         for definition in GMAIL_ENTITY_DEFINITIONS
         if definition.platform == "sensor"
-    }
+    } | {"connection_status", "last_successful_update"}
     expected_events = {
         definition.key
         for definition in GMAIL_ENTITY_DEFINITIONS

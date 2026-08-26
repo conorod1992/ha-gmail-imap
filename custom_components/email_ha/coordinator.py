@@ -188,13 +188,17 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         raw = self.oauth_session.token["access_token"]
         return raw.decode() if isinstance(raw, bytes) else str(raw)
 
-    async def async_preview_filter(self, folder: str, filters: dict[str, Any], limit: int = 5) -> list[dict[str, Any]]:
+    async def async_preview_filter(
+        self, folder: str, filters: dict[str, Any], limit: int = 5
+    ) -> list[dict[str, Any]]:
         """Run a bounded, body-free draft search without touching coordinator state."""
         tokens = build_structured_search_tokens(filters)
         access_token = await self._async_ensure_fresh_token()
         async with ImapClient(self._imap_host, self._imap_port) as client:
             await client.connect(self._email, access_token)
-            return await client.search_emails_tokens(folder, tokens, limit, include_body=False)
+            return await client.search_emails_tokens(
+                folder, tokens, limit, include_body=False
+            )
 
     async def _async_detect_new_emails(
         self, client: ImapClient, status: dict[str, int]
@@ -362,14 +366,19 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             count, newest_uid = await client.count_emails(DEFAULT_FOLDER, tokens)
             gmail_counts[definition.key] = SearchCountData(count, newest_uid)
 
-        # A paused watch remains configured but must not cause matching queries
-        # or header fetching. Missing ``enabled`` is the legacy-enabled default.
-        tracked_definitions = [
-            *self.custom_sensors,
-            *(watch for watch in self.email_watches if watch.get("enabled", True)),
-        ]
+        # All watch folders remain baseline-tracked while paused so re-enabling
+        # cannot replay mail that arrived during the pause. Only active filters
+        # cause header fetching or matching searches.
+        tracked_definitions = [*self.custom_sensors, *self.email_watches]
         tracked_folders = {
             str(item.get("folder", DEFAULT_FOLDER)) for item in tracked_definitions
+        }
+        active_filtered_folders = {
+            str(item.get("folder", DEFAULT_FOLDER))
+            for item in (
+                *self.custom_sensors,
+                *(watch for watch in self.email_watches if watch.get("enabled", True)),
+            )
         }
         folder_statuses = {self._folder: monitored_status}
         for folder in tracked_folders - {self._folder}:
@@ -378,7 +387,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
 
         arrivals: dict[str, list[dict[str, Any]]] = {}
         for folder, status in folder_statuses.items():
-            needs_filtered_messages = folder in tracked_folders
+            needs_filtered_messages = folder in active_filtered_folders
             if folder == self._folder:
                 # Maintain the established generic-event baseline for compatibility.
                 generic_messages = await self._async_detect_new_emails(client, status)

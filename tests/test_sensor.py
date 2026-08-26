@@ -49,10 +49,34 @@ def test_health_sensors_remain_available_and_use_freshness() -> None:
     assert timestamp.native_value == recent
     assert timestamp.device_class.value == "timestamp"
 
+    coordinator.last_update_success = False
+    assert status.native_value == "Stale"
+    assert status.available is True
+    assert timestamp.native_value == recent
+
+    coordinator.last_update_success = True
+    assert status.native_value == "Healthy"
+
     coordinator.last_success_time = datetime(2020, 1, 1, tzinfo=timezone.utc)
     assert status.available is True
     assert status.native_value == "Stale"
-    assert timestamp.native_value.year == 2020
+    historical = timestamp.native_value
+    assert historical is not None
+    assert historical.year == 2020
+    assert historical.tzinfo is not None
+
+
+def test_health_sensors_before_first_success() -> None:
+    """Health remains readable before Gmail has produced its first timestamp."""
+    coordinator = _coordinator(EmailData())
+    coordinator.last_success_time = None
+    status = ConnectionStatusSensor(coordinator, _entry())
+    timestamp = LastSuccessfulUpdateSensor(coordinator, _entry())
+
+    assert status.available is True
+    assert status.native_value == "Stale"
+    assert timestamp.available is True
+    assert timestamp.native_value is None
 
 
 @pytest.mark.parametrize(

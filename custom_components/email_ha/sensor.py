@@ -6,7 +6,11 @@ from datetime import datetime, timezone
 import logging
 from typing import Any
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -50,7 +54,12 @@ async def async_setup_entry(
         CustomEmailCountSensor(coordinator, entry, sensor)
         for sensor in entry.options.get(CONF_CUSTOM_SENSORS, [])
     )
-    entities.extend([ConnectionStatusSensor(coordinator, entry), LastSuccessfulUpdateSensor(coordinator, entry)])
+    entities.extend(
+        [
+            ConnectionStatusSensor(coordinator, entry),
+            LastSuccessfulUpdateSensor(coordinator, entry),
+        ]
+    )
     async_add_entities(entities)
 
 
@@ -212,7 +221,9 @@ class ConnectionStatusSensor(_BaseEmailSensor):
     _attr_entity_registry_enabled_default = False
     _attr_icon = "mdi:email-check-outline"
 
-    def __init__(self, coordinator: EmailDataUpdateCoordinator, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: EmailDataUpdateCoordinator, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, entry, "connection_status")
 
     @property
@@ -223,9 +234,11 @@ class ConnectionStatusSensor(_BaseEmailSensor):
     @property
     def native_value(self) -> str:
         timestamp = self.coordinator.last_success_time
-        fresh = timestamp is not None and (
-            datetime.now(timezone.utc) - timestamp
-        ).total_seconds() <= UNAVAILABLE_AFTER_SECONDS
+        fresh = (
+            timestamp is not None
+            and (datetime.now(timezone.utc) - timestamp).total_seconds()
+            <= UNAVAILABLE_AFTER_SECONDS
+        )
         return "Healthy" if self.coordinator.last_update_success and fresh else "Stale"
 
 
@@ -237,7 +250,9 @@ class LastSuccessfulUpdateSensor(_BaseEmailSensor):
     _attr_entity_registry_enabled_default = False
     _attr_icon = "mdi:clock-check-outline"
 
-    def __init__(self, coordinator: EmailDataUpdateCoordinator, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: EmailDataUpdateCoordinator, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, entry, "last_successful_update")
 
     @property
