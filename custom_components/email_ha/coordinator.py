@@ -366,9 +366,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             definition_id = str(definition.get("id", ""))
             folder = str(definition.get("folder", DEFAULT_FOLDER))
             caught_up = folder in catch_up_only_folders
-            if caught_up and (
-                not is_watch or not definition.get(CONF_CATCH_UP, False)
-            ):
+            if caught_up and (not is_watch or not definition.get(CONF_CATCH_UP, False)):
                 continue
             if not definition_id or not arrivals.get(folder):
                 continue
@@ -480,7 +478,9 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
 
         folder_statuses: dict[str, dict[str, int]] = {self._folder: monitored_status}
         for folder in tracked_folders - {self._folder}:
-            if status := await self._async_folder_status(client, folder, required=False):
+            if status := await self._async_folder_status(
+                client, folder, required=False
+            ):
                 folder_statuses[folder] = status
 
         # Generic New email deliberately retains its no-replay startup semantics.
@@ -572,9 +572,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                 listener(payload)
 
     @callback
-    def _notify_watch_matches(
-        self, matches: list[tuple[str, dict[str, Any]]]
-    ) -> None:
+    def _notify_watch_matches(self, matches: list[tuple[str, dict[str, Any]]]) -> None:
         """Deliver bounded, body-free matches to their watch EventEntities."""
         definitions = {str(watch.get("id", "")): watch for watch in self.email_watches}
         last_matches = getattr(self, "_watch_last_new_match", {})
