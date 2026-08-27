@@ -1,20 +1,13 @@
 {
   "domain": "email_ha",
   "name": "Email HA",
-  "codeowners": [
-    "@PineappleEmperor",
-    "@conorod1992"
-  ],
+  "codeowners": ["@PineappleEmperor", "@conorod1992"],
   "config_flow": true,
-  "dependencies": [
-    "application_credentials"
-  ],
+  "dependencies": ["application_credentials"],
   "documentation": "https://github.com/conorod1992/ha-gmail-imap",
   "integration_type": "hub",
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/conorod1992/ha-gmail-imap/issues",
-  "requirements": [
-    "aioimaplib==2.0.1"
-  ],
+  "requirements": ["aioimaplib==2.0.1"],
   "version": "2.5.0"
 }
