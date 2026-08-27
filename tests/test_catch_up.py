@@ -72,9 +72,7 @@ async def test_opted_in_restored_baseline_fetches_bounded_missed_mail() -> None:
     )
 
     assert [message["uid"] for message in messages] == ["101", "102"]
-    client.get_new_emails.assert_awaited_once_with(
-        "Receipts", 100, MAX_CATCH_UP_EVENTS
-    )
+    client.get_new_emails.assert_awaited_once_with("Receipts", 100, MAX_CATCH_UP_EVENTS)
 
 
 @pytest.mark.asyncio
