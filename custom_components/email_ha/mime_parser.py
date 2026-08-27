@@ -14,6 +14,9 @@ from typing import Any
 
 MAX_MIME_DEPTH = 20
 MAX_MIME_PARTS = 200
+MAX_ATTACHMENT_METADATA = 50
+MAX_ATTACHMENT_FILENAME_CHARS = 255
+MAX_ATTACHMENT_VALUE_CHARS = 512
 PREVIEW_CHARS = 500
 _MESSAGE_ID_RE = re.compile(r"<[^<>\r\n]{1,998}>")
 
@@ -114,20 +117,29 @@ def _message_ids(value: str | None) -> list[str]:
     return _MESSAGE_ID_RE.findall(value or "")
 
 
-def _walk_parts(message: Message, budget: _PartBudget, depth: int = 0) -> list[Message]:
+def _walk_parts(
+    message: Message,
+    budget: _PartBudget,
+    depth: int = 0,
+    path: tuple[int, ...] = (),
+) -> list[tuple[Message, str]]:
+    """Return leaf MIME parts with stable 1-based MIME paths."""
     if depth > MAX_MIME_DEPTH or budget.count >= MAX_MIME_PARTS:
         return []
     budget.count += 1
     if not message.is_multipart():
-        return [message]
-    result: list[Message] = []
+        part_path = path or (1,)
+        return [(message, ".".join(str(item) for item in part_path))]
+
+    result: list[tuple[Message, str]] = []
     payload = message.get_payload()
     if isinstance(payload, list):
-        for child in payload:
+        for index, child in enumerate(payload, start=1):
             if budget.count >= MAX_MIME_PARTS:
                 break
             if isinstance(child, Message):
-                result.extend(_walk_parts(child, budget, depth + 1))
+                child_path = (*path, index)
+                result.extend(_walk_parts(child, budget, depth + 1, child_path))
     return result
 
 
@@ -149,11 +161,32 @@ def _decode_part(part: Message) -> str:
     return payload.decode("utf-8", errors="replace")
 
 
-def _body_and_attachments(message: Message) -> tuple[str, list[dict[str, Any]]]:
+def _bounded_text(value: str | None, limit: int) -> str | None:
+    if value is None:
+        return None
+    return value[:limit]
+
+
+def _content_length(part: Message) -> int | None:
+    """Return a declared MIME Content-Length without reading attachment payload bytes."""
+    raw = part.get("Content-Length")
+    if raw is None:
+        return None
+    try:
+        value = int(str(raw).strip())
+    except ValueError:
+        return None
+    return value if value >= 0 else None
+
+
+def _body_and_attachments(
+    message: Message,
+) -> tuple[str, list[dict[str, Any]], int, bool]:
     plain: list[str] = []
     html: list[str] = []
     attachments: list[dict[str, Any]] = []
-    for part in _walk_parts(message, _PartBudget()):
+    attachment_count = 0
+    for part, part_id in _walk_parts(message, _PartBudget()):
         disposition = part.get_content_disposition()
         filename = decode_header_value(part.get_filename())
         content_type = part.get_content_type()
@@ -161,15 +194,26 @@ def _body_and_attachments(message: Message) -> tuple[str, list[dict[str, Any]]]:
         if is_attachment or (
             content_type.startswith("image/") and disposition == "inline"
         ):
-            attachments.append(
-                {
-                    "filename": filename or None,
-                    "content_type": content_type,
-                    "content_disposition": disposition,
-                    "content_id": part.get("Content-ID"),
-                    "size": None,
-                }
-            )
+            attachment_count += 1
+            if len(attachments) < MAX_ATTACHMENT_METADATA:
+                attachments.append(
+                    {
+                        "part_id": part_id,
+                        "filename": _bounded_text(
+                            filename or None, MAX_ATTACHMENT_FILENAME_CHARS
+                        ),
+                        "content_type": _bounded_text(
+                            content_type, MAX_ATTACHMENT_VALUE_CHARS
+                        ),
+                        "content_disposition": _bounded_text(
+                            disposition, MAX_ATTACHMENT_VALUE_CHARS
+                        ),
+                        "content_id": _bounded_text(
+                            part.get("Content-ID"), MAX_ATTACHMENT_VALUE_CHARS
+                        ),
+                        "size": _content_length(part),
+                    }
+                )
             continue
         if content_type == "text/plain":
             plain.append(_decode_part(part))
@@ -187,7 +231,12 @@ def _body_and_attachments(message: Message) -> tuple[str, list[dict[str, Any]]]:
         body = extractor.text()
     body = body.replace("\r\n", "\n").replace("\r", "\n")
     body = re.sub(r"[ \t]+\n", "\n", body)
-    return re.sub(r"\n{4,}", "\n\n\n", body).strip(), attachments
+    return (
+        re.sub(r"\n{4,}", "\n\n\n", body).strip(),
+        attachments,
+        attachment_count,
+        attachment_count > len(attachments),
+    )
 
 
 def parse_email_bytes(
@@ -215,7 +264,20 @@ def parse_email_bytes(
     senders = _addresses(message, "from")
     references = _message_ids(message.get("References"))
     in_reply_to_ids = _message_ids(message.get("In-Reply-To"))
-    body, attachments = _body_and_attachments(message) if include_body else ("", [])
+    if include_body:
+        body, attachments, attachment_count, attachments_truncated = (
+            _body_and_attachments(message)
+        )
+        attachment_metadata_available = True
+        attachment_metadata_unavailable_reason = None
+    else:
+        body = ""
+        attachments = []
+        attachment_count = None
+        attachments_truncated = None
+        attachment_metadata_available = False
+        attachment_metadata_unavailable_reason = "header_only"
+
     truncated = len(body) > body_max_chars
     result: dict[str, Any] = {
         "uid": str(uid),
@@ -232,8 +294,13 @@ def parse_email_bytes(
         "flags": flags or [],
         "folder": folder,
         "preview": re.sub(r"\s+", " ", body)[:PREVIEW_CHARS],
-        "has_attachments": bool(attachments),
-        "attachment_count": len(attachments),
+        "attachment_metadata_available": attachment_metadata_available,
+        "attachment_metadata_unavailable_reason": attachment_metadata_unavailable_reason,
+        "has_attachments": bool(attachment_count)
+        if attachment_count is not None
+        else None,
+        "attachment_count": attachment_count,
+        "attachments_truncated": attachments_truncated,
         "attachments": attachments,
     }
     if include_body:
