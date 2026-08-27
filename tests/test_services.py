@@ -100,6 +100,37 @@ async def test_find_emails_translates_filters_and_defaults_to_no_body(
 
 
 @pytest.mark.asyncio
+async def test_find_emails_exposes_latest_match_without_extra_search(monkeypatch) -> None:
+    """Automations can access the newest match directly from the bounded result."""
+    hass = _configured_hass()
+    emails = [{"uid": "9", "subject": "Newest"}, {"uid": "8", "subject": "Older"}]
+    search = AsyncMock(return_value=emails)
+    monkeypatch.setattr("custom_components.email_ha._search_structured", search)
+    handler, schema = hass.services.registered[(DOMAIN, SERVICE_FIND_EMAILS)]
+
+    response = await handler(SimpleNamespace(data=schema({"subject": "renewal"})))
+
+    assert response["latest_email"] == emails[0]
+    assert response["emails"] == emails
+    search.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_find_emails_latest_match_is_none_when_no_results(monkeypatch) -> None:
+    """An empty search has an explicit null latest-match convenience value."""
+    hass = _configured_hass()
+    monkeypatch.setattr(
+        "custom_components.email_ha._search_structured", AsyncMock(return_value=[])
+    )
+    handler, schema = hass.services.registered[(DOMAIN, SERVICE_FIND_EMAILS)]
+
+    response = await handler(SimpleNamespace(data=schema({"subject": "missing"})))
+
+    assert response["latest_email"] is None
+    assert response["emails"] == []
+
+
+@pytest.mark.asyncio
 async def test_find_emails_body_opt_in_and_limit_are_propagated(monkeypatch) -> None:
     """Private content requires an explicit bounded action choice."""
     hass = _configured_hass()
