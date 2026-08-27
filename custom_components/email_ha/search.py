@@ -155,7 +155,7 @@ def _imap_date(value: Any, field: str) -> str | None:
 def normalize_structured_filters(filters: Mapping[str, Any]) -> dict[str, Any]:
     """Return populated structured filters in a response-safe form."""
     normalized: dict[str, Any] = {}
-    match_mode = filters.get("match_mode", "all")
+    match_mode = filters.get("match_mode") or "all"
     if match_mode not in MATCH_MODES:
         raise ValueError("Invalid match_mode")
     if match_mode != "all":
