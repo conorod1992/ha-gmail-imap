@@ -100,7 +100,12 @@ def test_watch_exposes_pause_and_query_health_without_filter_values() -> None:
         last_error_type="FolderQueryError",
         last_error="Configured folder could not be queried",
     )
-    coordinator = SimpleNamespace(rule_health=Mock(return_value=health))
+    coordinator = SimpleNamespace(
+        rule_health=Mock(return_value=health),
+        _watch_last_new_match={
+            "watch-uuid": "2026-07-28T09:30:00+00:00"
+        },
+    )
     entity = EmailWatchEventEntity(
         coordinator,
         entry,
@@ -118,6 +123,7 @@ def test_watch_exposes_pause_and_query_health_without_filter_values() -> None:
         "folder": "Receipts",
         "enabled": True,
         "catch_up": True,
+        "last_new_match": "2026-07-28T09:30:00+00:00",
         "rule_status": "Error",
         "last_successful_check": "2026-07-28T09:00:00+00:00",
         "last_error_at": "2026-07-28T10:00:00+00:00",
@@ -125,3 +131,21 @@ def test_watch_exposes_pause_and_query_health_without_filter_values() -> None:
         "last_error": "Configured folder could not be queried",
     }
     assert "private.example" not in str(entity.extra_state_attributes)
+
+
+def test_watch_without_prior_match_exposes_null_timestamp() -> None:
+    """A watch with no persisted match history reports no last match."""
+    entry = SimpleNamespace(
+        entry_id="entry-1", data={"email": "user@example.com"}, options={}
+    )
+    coordinator = SimpleNamespace(
+        rule_health=Mock(return_value=RuleHealthData()),
+        _watch_last_new_match={},
+    )
+    entity = EmailWatchEventEntity(
+        coordinator,
+        entry,
+        {"id": "new-watch", "name": "New", "folder": "INBOX"},
+    )
+
+    assert entity.extra_state_attributes["last_new_match"] is None
