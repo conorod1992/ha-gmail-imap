@@ -32,6 +32,21 @@ def test_match_any_builds_nested_imap_or() -> None:
     ) == ["OR", '(FROM "rsa.ie")', '(SUBJECT "check test")']
 
 
+def test_match_any_nests_three_independent_conditions() -> None:
+    assert build_structured_search_tokens(
+        {
+            "match_mode": "any",
+            "from": "rsa.ie",
+            "subject": "renewal",
+            "read_state": "unread",
+        }
+    ) == [
+        "OR",
+        '(FROM "rsa.ie")',
+        '(OR (SUBJECT "renewal") UNSEEN)',
+    ]
+
+
 def test_match_any_handles_single_token_and_gmail_extension() -> None:
     assert build_structured_search_tokens(
         {"match_mode": "any", "read_state": "unread", "gmail_category": "primary"}
