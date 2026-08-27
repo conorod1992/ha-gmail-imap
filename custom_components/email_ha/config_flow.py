@@ -208,7 +208,9 @@ def _custom_sensor_summary(sensor_config: dict[str, Any]) -> str:
     )
     disabled = " — Disabled" if sensor_config.get("enabled", True) is False else ""
     catch_up = " · Catch up after restart" if sensor_config.get(CONF_CATCH_UP) else ""
-    return f"{sensor_config.get('name', 'Custom sensor')} — {summary}{catch_up}{disabled}"
+    return (
+        f"{sensor_config.get('name', 'Custom sensor')} — {summary}{catch_up}{disabled}"
+    )
 
 
 def _full_rule_summary(draft: dict[str, Any]) -> str:
