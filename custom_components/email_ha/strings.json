@@ -7,12 +7,8 @@
       "user": {
         "title": "Connect a Gmail account",
         "description": "Enter the Gmail account you want to use. You will sign in securely with Google on the next screen.",
-        "data": {
-          "email": "Gmail address"
-        },
-        "data_description": {
-          "email": "The full Gmail or Google Workspace email address."
-        }
+        "data": {"email": "Gmail address"},
+        "data_description": {"email": "The full Gmail or Google Workspace email address."}
       },
       "auth": {
         "title": "Sign in with Google",
@@ -21,12 +17,8 @@
       "sensors": {
         "title": "Choose Gmail entities",
         "description": "Recommended Gmail entities are already selected. You can change this selection later from Configure.",
-        "data": {
-          "gmail_entities": "Gmail entities"
-        },
-        "data_description": {
-          "gmail_entities": "Primary unread, Latest email, and New email are recommended for most homes."
-        }
+        "data": {"gmail_entities": "Gmail entities"},
+        "data_description": {"gmail_entities": "Primary unread, Latest email, and New email are recommended for most homes."}
       },
       "reauth_confirm": {
         "title": "Sign in to Gmail again",
@@ -63,105 +55,165 @@
       "gmail_sensors": {
         "title": "Gmail sensors",
         "description": "Choose the Gmail entities you want for this account. Disabled entities remain discoverable and can be enabled here later.",
-        "data": {
-          "gmail_entities": "Enabled Gmail entities"
-        }
+        "data": {"gmail_entities": "Enabled Gmail entities"}
       },
       "custom_sensors": {
         "title": "Custom email sensors",
-        "description": "Add, edit, duplicate, or delete a sensor that counts matching email on Gmail's server.",
-        "data": {
-          "manage_action": "Choose an action"
-        }
+        "description": "Pick an existing rule to manage it, or add a new one. Each item shows its current rule in plain English.",
+        "data": {"manage_action": "Choose a sensor"}
       },
       "email_watches": {
         "title": "Email watches",
-        "description": "Add, edit, duplicate, pause, or delete a watch that fires an event when arriving email matches.",
-        "data": {"manage_action": "Choose an action"}
+        "description": "Pick an existing watch to manage it, or add a new one. Each item shows its current rule in plain English.",
+        "data": {"manage_action": "Choose a watch"}
       },
       "custom_sensor_common": {
-        "title": "Custom email sensor",
-        "description": "Only the number of matching emails is retrieved. Matching is performed by Gmail; message contents are not downloaded for this sensor. Blank filters are ignored; choose whether all filled conditions or any filled condition must match. Current rule: {summary}.",
+        "title": "Build a custom email sensor",
+        "description": "Create the rule in everyday Gmail terms. Blank text fields and options set to Any are ignored. Choose how the filled filters combine, then optionally preview matches before saving. Gmail performs the matching; this sensor only retrieves a count. Current rule: {summary}.",
         "data": {
-          "name": "Name",
-          "folder": "Folder",
-          "match_mode": "Match",
-          "from": "From contains",
+          "name": "Sensor name",
+          "folder": "Search folder",
+          "match_mode": "How should the filters combine?",
+          "from": "Sender contains",
           "subject": "Subject contains",
-          "read_state": "Read state",
+          "read_state": "Read / unread",
           "gmail_category": "Gmail category",
-          "important_state": "Gmail importance",
-          "starred_state": "Starred state",
-          "attachment_state": "Attachment",
-          "more_filters": "Add more filters",
-          "test_filter": "Test filter"
+          "important_state": "Importance",
+          "starred_state": "Starred",
+          "attachment_state": "Attachments",
+          "more_filters": "Show recipient, content and date filters",
+          "test_filter": "Preview matches before saving"
         },
         "data_description": {
-          "name": "A clear entity name, such as RSA unread or Bookings.",
-          "folder": "Choose a discovered folder or enter its exact IMAP name.",
-          "match_mode": "All conditions require every filled filter to match. Any condition matches when at least one filled filter matches.",
-          "from": "Match sender name or address. Example: rsa.ie",
-          "subject": "Match subject text. Example: booking",
-          "more_filters": "Continue to recipient, body-text, any-text, and date filters. Turning this off clears those filters when editing."
+          "name": "Use a name that describes the result, such as RSA unread or Booking emails.",
+          "folder": "Inbox is the usual choice. You can also choose a discovered Gmail folder or enter its exact IMAP name.",
+          "match_mode": "Every filled condition is stricter. At least one filled condition is broader. This choice matters only when more than one filter is filled.",
+          "from": "Matches sender name or email address. You can enter part of either, for example rsa.ie.",
+          "subject": "Matches text appearing in the subject, for example booking or renewal.",
+          "read_state": "Limit the rule to unread or already-read email, or leave as Any.",
+          "gmail_category": "Limit the rule to a Gmail tab such as Primary, Updates, or Promotions.",
+          "important_state": "Match Gmail's Important marker, its absence, or either.",
+          "starred_state": "Match starred email, unstarred email, or either.",
+          "attachment_state": "Require an attachment, require no attachment, or ignore attachments.",
+          "more_filters": "Continue to To/CC recipients, message text, attachment filename, and date filters. Existing additional filters are shown again when editing.",
+          "test_filter": "Before saving, show up to five newest messages that currently match this rule. No message body is downloaded for the preview."
         }
       },
       "custom_sensor_advanced": {
-        "title": "More custom sensor filters",
-        "description": "These optional conditions use the Match choice from the previous screen. Body and text matching happen on Gmail's server without downloading message bodies into Home Assistant. Choose either a relative date or exact date filters, not both. Current rule: {summary}.",
+        "title": "Recipient, content and date filters",
+        "description": "Use only the extra conditions you need. They combine with the previous screen using the same Every/At least one choice. Body and text matching are performed by Gmail on the server. For time filtering, choose either a relative period or exact dates, not both. Current rule: {summary}.",
         "data": {
-          "to": "To contains",
-          "cc": "CC contains",
-          "body": "Body contains",
-          "text": "Any text contains",
+          "to": "To recipient contains",
+          "cc": "CC recipient contains",
+          "body": "Message body contains",
+          "text": "Anywhere in message contains",
           "attachment_filename": "Attachment filename contains",
-          "relative_date": "Relative date",
-          "since": "Since",
-          "before": "Before",
-          "on": "On",
-          "test_filter": "Test filter"
+          "relative_date": "When was it received?",
+          "since": "Received on or after",
+          "before": "Received before",
+          "on": "Received on",
+          "test_filter": "Preview matches before saving"
+        },
+        "data_description": {
+          "to": "Match part of a To recipient name or address.",
+          "cc": "Match part of a CC recipient name or address.",
+          "body": "Ask Gmail to match text in the message body without downloading the body into Home Assistant.",
+          "text": "Ask Gmail to match text anywhere it searches in the message, including headers and body.",
+          "attachment_filename": "Match part of an attachment filename, for example .pdf or invoice.",
+          "relative_date": "Choose a rolling or calendar-relative period such as Today, Last 24 hours, or Last 7 days.",
+          "since": "Use an exact date only when Relative date is Any time.",
+          "before": "Messages on this date are excluded. Use only when Relative date is Any time.",
+          "on": "Match this exact calendar date. Do not combine with Relative date.",
+          "test_filter": "Show up to five newest messages that currently match the complete rule before saving."
         }
       },
       "custom_sensor_action": {
         "title": "Manage custom email sensor",
-        "description": "Choose what to do with this sensor.",
-        "data": {"action": "Action"}
+        "description": "Edit this rule, make a copy as a starting point for another rule, or delete it.",
+        "data": {"action": "What do you want to do?"}
       },
       "custom_sensor_preview": {
-        "title": "Filter preview",
-        "description": "{preview}",
+        "title": "Preview matching emails",
+        "description": "{preview}\n\nTurn on Save this sensor to keep the rule. Leave it off to go back and adjust the filters.",
         "data": {"save": "Save this sensor"}
       },
       "delete_custom_sensor": {
         "title": "Delete {name}?",
         "description": "This removes the custom sensor definition and its entity after the integration reloads.",
-        "data": {
-          "confirm": "Delete this custom sensor"
-        }
+        "data": {"confirm": "Delete this custom sensor"}
       },
       "email_watch_common": {
-        "title": "Email watch",
-        "description": "Fires an event when Email HA observes an arriving message that satisfies the selected Match rule. Catch-up is optional and bounded; message bodies are never included in watch events. Current rule: {summary}.",
+        "title": "Build an email watch",
+        "description": "Create the arrival rule in everyday Gmail terms. Blank text fields and options set to Any are ignored. The watch fires only for newly observed matching email; message bodies are never included in watch events. Current rule: {summary}.",
         "data": {
-          "name": "Name", "folder": "Folder", "match_mode": "Match", "from": "From contains", "subject": "Subject contains", "read_state": "Read state", "gmail_category": "Gmail category", "important_state": "Gmail importance", "starred_state": "Starred state", "attachment_state": "Attachment", "more_filters": "Add more filters", "test_filter": "Test filter", "enabled": "Enabled", "catch_up": "Catch up missed email after restart"
+          "name": "Watch name",
+          "folder": "Watch folder",
+          "match_mode": "How should the filters combine?",
+          "from": "Sender contains",
+          "subject": "Subject contains",
+          "read_state": "Read / unread",
+          "gmail_category": "Gmail category",
+          "important_state": "Importance",
+          "starred_state": "Starred",
+          "attachment_state": "Attachments",
+          "more_filters": "Show recipient, content and date filters",
+          "test_filter": "Preview matches before saving",
+          "enabled": "Watch is enabled",
+          "catch_up": "Catch up email missed while Home Assistant was offline"
         },
         "data_description": {
-          "match_mode": "All conditions require every filled filter to match. Any condition matches when at least one filled filter matches.",
-          "catch_up": "When enabled, Email HA persists a lightweight UID baseline and checks up to 25 messages that arrived while Home Assistant was offline. Existing mail from before the saved baseline is never replayed."
+          "name": "Use a name that describes the event, such as RSA renewal or Booking received.",
+          "folder": "Inbox is the usual choice. You can also choose a discovered Gmail folder or enter its exact IMAP name.",
+          "match_mode": "Every filled condition is stricter. At least one filled condition is broader. This choice matters only when more than one filter is filled.",
+          "from": "Matches sender name or email address. You can enter part of either, for example rsa.ie.",
+          "subject": "Matches text appearing in the subject, for example booking or renewal.",
+          "read_state": "Limit the rule to unread or already-read email, or leave as Any.",
+          "gmail_category": "Limit the rule to a Gmail tab such as Primary, Updates, or Promotions.",
+          "important_state": "Match Gmail's Important marker, its absence, or either.",
+          "starred_state": "Match starred email, unstarred email, or either.",
+          "attachment_state": "Require an attachment, require no attachment, or ignore attachments.",
+          "more_filters": "Continue to To/CC recipients, message text, attachment filename, and date filters.",
+          "test_filter": "Preview up to five current matches without changing watch baselines or firing events.",
+          "enabled": "Disable a watch without deleting its rule or event entity.",
+          "catch_up": "When enabled, Email HA remembers a lightweight UID baseline and checks up to 25 messages that arrived while Home Assistant was offline. Older mail is never replayed."
         }
       },
       "email_watch_advanced": {
-        "title": "More email watch filters",
-        "description": "These optional conditions use the Match choice from the previous screen. Choose either a relative date or exact date filters, not both. Current rule: {summary}.",
-        "data": {"to": "To contains", "cc": "CC contains", "body": "Body contains", "text": "Any text contains", "attachment_filename": "Attachment filename contains", "relative_date": "Relative date", "since": "Since", "before": "Before", "on": "On", "test_filter": "Test filter"}
+        "title": "Recipient, content and date filters",
+        "description": "Use only the extra conditions you need. They combine with the previous screen using the same Every/At least one choice. For time filtering, choose either a relative period or exact dates, not both. Current rule: {summary}.",
+        "data": {
+          "to": "To recipient contains",
+          "cc": "CC recipient contains",
+          "body": "Message body contains",
+          "text": "Anywhere in message contains",
+          "attachment_filename": "Attachment filename contains",
+          "relative_date": "When was it received?",
+          "since": "Received on or after",
+          "before": "Received before",
+          "on": "Received on",
+          "test_filter": "Preview matches before saving"
+        },
+        "data_description": {
+          "to": "Match part of a To recipient name or address.",
+          "cc": "Match part of a CC recipient name or address.",
+          "body": "Ask Gmail to match text in the message body without adding that body to the watch event.",
+          "text": "Ask Gmail to match text anywhere it searches in the message, including headers and body.",
+          "attachment_filename": "Match part of an attachment filename, for example .pdf or invoice.",
+          "relative_date": "Choose a rolling or calendar-relative period such as Today, Last 24 hours, or Last 7 days.",
+          "since": "Use an exact date only when Relative date is Any time.",
+          "before": "Messages on this date are excluded. Use only when Relative date is Any time.",
+          "on": "Match this exact calendar date. Do not combine with Relative date.",
+          "test_filter": "Preview the complete rule without firing watch events or changing arrival baselines."
+        }
       },
       "email_watch_action": {
         "title": "Manage email watch",
-        "description": "Choose what to do with this watch.",
-        "data": {"action": "Action"}
+        "description": "Edit or copy this rule, enable or pause the watch without deleting it, or delete it completely.",
+        "data": {"action": "What do you want to do?"}
       },
       "email_watch_preview": {
-        "title": "Filter preview",
-        "description": "{preview}",
+        "title": "Preview matching emails",
+        "description": "{preview}\n\nTurn on Save this watch to keep the rule. Leave it off to go back and adjust the filters.",
         "data": {"save": "Save this watch"}
       },
       "delete_email_watch": {
@@ -172,12 +224,8 @@
       "advanced_account_settings": {
         "title": "Advanced account settings",
         "description": "Gmail IMAP IDLE provides normal near-real-time updates; an internal 15-minute refresh is used only for resilience. The folder below affects Latest email and New email. Gmail count sensors always use Inbox.",
-        "data": {
-          "monitored_folder": "Latest email and New email folder"
-        },
-        "data_description": {
-          "monitored_folder": "Choose a discovered folder or enter an exact IMAP folder name. Inbox is recommended."
-        }
+        "data": {"monitored_folder": "Latest email and New email folder"},
+        "data_description": {"monitored_folder": "Choose a discovered folder or enter an exact IMAP folder name. Inbox is recommended."}
       }
     },
     "error": {
@@ -212,35 +260,17 @@
         "mailbox_folders": "Mailbox folders"
       }
     },
-    "read_state": {
-      "options": {"any": "Any", "unread": "Unread", "read": "Read"}
-    },
-    "starred_state": {
-      "options": {"any": "Any", "starred": "Starred", "not_starred": "Not starred"}
-    },
-    "important_state": {
-      "options": {"any": "Any", "important": "Important", "not_important": "Not important"}
-    },
-    "attachment_state": {
-      "options": {"any": "Any", "has_attachment": "Has attachment", "no_attachment": "No attachment"}
-    },
-    "gmail_category": {
-      "options": {"any": "Any", "primary": "Primary", "updates": "Updates", "promotions": "Promotions", "social": "Social", "forums": "Forums"}
-    },
-    "relative_date": {
-      "options": {"any": "Any time", "today": "Today", "yesterday": "Yesterday", "last_24_hours": "Last 24 hours", "last_7_days": "Last 7 days", "last_30_days": "Last 30 days"}
-    },
-    "manage_action": {
-      "options": {"edit": "Edit", "duplicate": "Duplicate", "delete": "Delete", "enable": "Enable", "disable": "Disable"}
-    },
-    "match_mode": {
-      "options": {"all": "All conditions", "any": "Any condition"}
-    }
+    "read_state": {"options": {"any": "Any", "unread": "Unread", "read": "Read"}},
+    "starred_state": {"options": {"any": "Any", "starred": "Starred", "not_starred": "Not starred"}},
+    "important_state": {"options": {"any": "Any", "important": "Important", "not_important": "Not important"}},
+    "attachment_state": {"options": {"any": "Any", "has_attachment": "Has attachment", "no_attachment": "No attachment"}},
+    "gmail_category": {"options": {"any": "Any", "primary": "Primary", "updates": "Updates", "promotions": "Promotions", "social": "Social", "forums": "Forums"}},
+    "relative_date": {"options": {"any": "Any time", "today": "Today", "yesterday": "Yesterday", "last_24_hours": "Last 24 hours", "last_7_days": "Last 7 days", "last_30_days": "Last 30 days"}},
+    "manage_action": {"options": {"edit": "Edit rule", "duplicate": "Duplicate as new rule", "delete": "Delete", "enable": "Enable watch", "disable": "Pause watch"}},
+    "match_mode": {"options": {"all": "Every filled condition", "any": "At least one filled condition"}}
   },
   "entity": {
-    "event": {
-      "new_email": {"name": "New email"}
-    },
+    "event": {"new_email": {"name": "New email"}},
     "sensor": {
       "primary_unread": {"name": "Primary unread"},
       "inbox_unread": {"name": "Inbox unread"},
