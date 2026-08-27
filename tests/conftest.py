@@ -15,10 +15,10 @@ if "custom_components" not in sys.modules:
     custom_components.__path__ = [str(_CUSTOM_COMPONENTS)]
     sys.modules["custom_components"] = custom_components
 
+from custom_components.email_ha.coordinator import EmailDataUpdateCoordinator
+
 
 @pytest.fixture(autouse=True)
 def _reset_partial_coordinator_rule_health(monkeypatch: pytest.MonkeyPatch) -> None:
     """Give tests that bypass coordinator __init__ isolated rule-health state."""
-    from custom_components.email_ha.coordinator import EmailDataUpdateCoordinator
-
     monkeypatch.setattr(EmailDataUpdateCoordinator, "_rule_health", {}, raising=False)
