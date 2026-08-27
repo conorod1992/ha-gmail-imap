@@ -1,3 +1,4 @@
+# ruff: noqa: SLF001
 # pyright: reportPrivateUsage=false
 """Tests for privacy-safe per-rule health transitions."""
 
