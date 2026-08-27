@@ -1,8 +1,8 @@
 find_emails:
   name: Find emails
   description: >
-    Find emails with friendly filters. Blank filters are ignored and all filled
-    conditions must match. Gmail performs the search on its server.
+    Find emails with friendly filters. Blank filters are ignored. Choose whether
+    all filled conditions or any filled condition must match. Gmail performs the search on its server.
   target: {}
   fields:
     config_entry_id:
@@ -19,6 +19,17 @@ find_emails:
       example: INBOX
       selector:
         text: {}
+    match_mode:
+      name: Match
+      description: Require all filled conditions to match, or allow any one filled condition to match.
+      default: all
+      selector:
+        select:
+          options:
+            - label: All conditions
+              value: all
+            - label: Any condition
+              value: any
     from:
       name: From contains
       description: "Match sender name or email address. Example: rsa.ie"

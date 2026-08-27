@@ -81,10 +81,11 @@
       },
       "custom_sensor_common": {
         "title": "Custom email sensor",
-        "description": "Only the number of matching emails is retrieved. Matching is performed by Gmail; message contents are not downloaded for this sensor. Only filled filters are used, and all filled conditions must match. Current rule: {summary}.",
+        "description": "Only the number of matching emails is retrieved. Matching is performed by Gmail; message contents are not downloaded for this sensor. Blank filters are ignored; choose whether all filled conditions or any filled condition must match. Current rule: {summary}.",
         "data": {
           "name": "Name",
           "folder": "Folder",
+          "match_mode": "Match",
           "from": "From contains",
           "subject": "Subject contains",
           "read_state": "Read state",
@@ -98,6 +99,7 @@
         "data_description": {
           "name": "A clear entity name, such as RSA unread or Bookings.",
           "folder": "Choose a discovered folder or enter its exact IMAP name.",
+          "match_mode": "All conditions require every filled filter to match. Any condition matches when at least one filled filter matches.",
           "from": "Match sender name or address. Example: rsa.ie",
           "subject": "Match subject text. Example: booking",
           "more_filters": "Continue to recipient, body-text, any-text, and date filters. Turning this off clears those filters when editing."
@@ -105,7 +107,7 @@
       },
       "custom_sensor_advanced": {
         "title": "More custom sensor filters",
-        "description": "These optional conditions are also combined with AND. Body and text matching happen on Gmail's server without downloading message bodies into Home Assistant. Choose either a relative date or exact date filters, not both. Current rule: {summary}.",
+        "description": "These optional conditions use the Match choice from the previous screen. Body and text matching happen on Gmail's server without downloading message bodies into Home Assistant. Choose either a relative date or exact date filters, not both. Current rule: {summary}.",
         "data": {
           "to": "To contains",
           "cc": "CC contains",
@@ -138,17 +140,18 @@
       },
       "email_watch_common": {
         "title": "Email watch",
-        "description": "Fires an event when Email HA observes an arriving message that matches every filled filter. Catch-up is optional and bounded; message bodies are never included in watch events. Current rule: {summary}.",
+        "description": "Fires an event when Email HA observes an arriving message that satisfies the selected Match rule. Catch-up is optional and bounded; message bodies are never included in watch events. Current rule: {summary}.",
         "data": {
-          "name": "Name", "folder": "Folder", "from": "From contains", "subject": "Subject contains", "read_state": "Read state", "gmail_category": "Gmail category", "important_state": "Gmail importance", "starred_state": "Starred state", "attachment_state": "Attachment", "more_filters": "Add more filters", "test_filter": "Test filter", "enabled": "Enabled", "catch_up": "Catch up missed email after restart"
+          "name": "Name", "folder": "Folder", "match_mode": "Match", "from": "From contains", "subject": "Subject contains", "read_state": "Read state", "gmail_category": "Gmail category", "important_state": "Gmail importance", "starred_state": "Starred state", "attachment_state": "Attachment", "more_filters": "Add more filters", "test_filter": "Test filter", "enabled": "Enabled", "catch_up": "Catch up missed email after restart"
         },
         "data_description": {
+          "match_mode": "All conditions require every filled filter to match. Any condition matches when at least one filled filter matches.",
           "catch_up": "When enabled, Email HA persists a lightweight UID baseline and checks up to 25 messages that arrived while Home Assistant was offline. Existing mail from before the saved baseline is never replayed."
         }
       },
       "email_watch_advanced": {
         "title": "More email watch filters",
-        "description": "These optional conditions are combined with AND. Choose either a relative date or exact date filters, not both. Current rule: {summary}.",
+        "description": "These optional conditions use the Match choice from the previous screen. Choose either a relative date or exact date filters, not both. Current rule: {summary}.",
         "data": {"to": "To contains", "cc": "CC contains", "body": "Body contains", "text": "Any text contains", "attachment_filename": "Attachment filename contains", "relative_date": "Relative date", "since": "Since", "before": "Before", "on": "On", "test_filter": "Test filter"}
       },
       "email_watch_action": {
@@ -229,6 +232,9 @@
     },
     "manage_action": {
       "options": {"edit": "Edit", "duplicate": "Duplicate", "delete": "Delete", "enable": "Enable", "disable": "Disable"}
+    },
+    "match_mode": {
+      "options": {"all": "All conditions", "any": "Any condition"}
     }
   },
   "entity": {
@@ -260,7 +266,7 @@
   "services": {
     "find_emails": {
       "name": "Find emails",
-      "description": "Find emails with friendly filters. Blank filters are ignored and filled filters combine with AND."
+      "description": "Find emails with friendly filters. Blank filters are ignored; choose whether all filled conditions or any filled condition must match."
     },
     "search_emails": {
       "name": "Advanced: Search using IMAP query",

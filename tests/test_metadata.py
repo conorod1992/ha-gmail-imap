@@ -62,5 +62,5 @@ def test_action_translation_and_yaml_surfaces_match() -> None:
 
 def test_release_metadata_matches_current_feature_version() -> None:
     """The manifest exposes the current feature release and supported HA minimum."""
-    assert _json(_INTEGRATION / "manifest.json")["version"] == "2.4.0"
+    assert _json(_INTEGRATION / "manifest.json")["version"] == "2.5.0"
     assert _json(_ROOT / "hacs.json")["homeassistant"] == "2026.7.0"

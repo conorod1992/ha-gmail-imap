@@ -317,7 +317,7 @@ Turn on **Add more filters** to use additional fields such as:
 
 Blank fields are ignored.
 
-If you fill in more than one filter, **all filled conditions must match**.
+Choose **All conditions** when every filled filter must match, or **Any condition** when matching any one filled filter is enough.
 
 ## What does a custom sensor retrieve?
 
@@ -590,7 +590,7 @@ It provides standard fields such as:
 
 Blank filters are ignored.
 
-If you fill in several filters, they are combined with **AND**.
+Use **All conditions** for AND matching, or choose **Any condition** to match when at least one filled filter is true. `match_mode` defaults to `all`, so existing automations keep their current behaviour.
 
 Search results are returned newest first.
 
