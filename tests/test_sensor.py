@@ -8,7 +8,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from custom_components.email_ha.coordinator import EmailData, SearchCountData
+from custom_components.email_ha.coordinator import (
+    EmailData,
+    RuleHealthData,
+    SearchCountData,
+)
 from custom_components.email_ha.gmail import GMAIL_ENTITIES
 from custom_components.email_ha.sensor import (
     ConnectionStatusSensor,
@@ -26,12 +30,13 @@ def _entry(enabled: list[str] | None = None):
     )
 
 
-def _coordinator(data: EmailData):
+def _coordinator(data: EmailData, health: RuleHealthData | None = None):
     return SimpleNamespace(
         data=data,
         folder="INBOX",
         last_success_time=datetime.now(timezone.utc),
         last_update_success=True,
+        rule_health=lambda _rule_id: health or RuleHealthData(),
     )
 
 
@@ -174,8 +179,15 @@ def test_mailbox_folders_is_disabled_by_default() -> None:
     assert sensor.entity_registry_enabled_default is False
 
 
-def test_custom_sensor_hides_private_filter_values() -> None:
-    """Entity attributes identify filter types but not owner-entered values."""
+def test_custom_sensor_hides_private_filter_values_and_exposes_health() -> None:
+    """Entity attributes show rule health without exposing owner-entered values."""
+    health = RuleHealthData(
+        status="Healthy",
+        last_successful_check="2026-07-28T10:02:00+00:00",
+        last_error_at="2026-07-27T09:00:00+00:00",
+        last_error_type="ImapClientError",
+        last_error="Custom sensor query failed",
+    )
     sensor = CustomEmailCountSensor(
         _coordinator(
             EmailData(
@@ -190,7 +202,8 @@ def test_custom_sensor_hides_private_filter_values() -> None:
                         "2026-07-28T10:01:00+00:00",
                     )
                 }
-            )
+            ),
+            health,
         ),
         _entry(),
         {
@@ -212,5 +225,10 @@ def test_custom_sensor_hides_private_filter_values() -> None:
         "newest_matching_sender_address": "sender@example.com",
         "newest_matching_date": "2026-07-28T10:00:00+00:00",
         "last_new_match": "2026-07-28T10:01:00+00:00",
+        "rule_status": "Healthy",
+        "last_successful_check": "2026-07-28T10:02:00+00:00",
+        "last_error_at": "2026-07-27T09:00:00+00:00",
+        "last_error_type": "ImapClientError",
+        "last_error": "Custom sensor query failed",
     }
     assert "rsa.ie" not in str(sensor.extra_state_attributes)

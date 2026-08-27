@@ -28,7 +28,7 @@ from .const import (
     DOMAIN,
     UNAVAILABLE_AFTER_SECONDS,
 )
-from .coordinator import EmailData, EmailDataUpdateCoordinator
+from .coordinator import EmailData, EmailDataUpdateCoordinator, RuleHealthData
 from .entity import gmail_device_info
 from .gmail import (
     GMAIL_SENSOR_DEFINITIONS,
@@ -37,6 +37,17 @@ from .gmail import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _rule_health_attributes(health: RuleHealthData) -> dict[str, str | None]:
+    """Return stable, privacy-safe health attributes for a user-managed rule."""
+    return {
+        "rule_status": health.status,
+        "last_successful_check": health.last_successful_check,
+        "last_error_at": health.last_error_at,
+        "last_error_type": health.last_error_type,
+        "last_error": health.last_error,
+    }
 
 
 async def async_setup_entry(
@@ -211,6 +222,7 @@ class CustomEmailCountSensor(_BaseEmailSensor):
             ),
             "newest_matching_date": result.newest_date if result else None,
             "last_new_match": result.last_new_match if result else None,
+            **_rule_health_attributes(self.coordinator.rule_health(self._sensor_id)),
         }
 
 

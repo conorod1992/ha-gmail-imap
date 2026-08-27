@@ -11,6 +11,7 @@ from custom_components.email_ha.const import (
     EVENT_TYPE_NEW_MATCHING_EMAIL,
     PLATFORMS,
 )
+from custom_components.email_ha.coordinator import RuleHealthData
 from custom_components.email_ha.event import EmailWatchEventEntity, NewEmailEventEntity
 
 
@@ -59,7 +60,10 @@ def test_watch_rename_preserves_identity_and_emits_bounded_payload() -> None:
     entry = SimpleNamespace(
         entry_id="entry-1", data={"email": "user@example.com"}, options={}
     )
-    coordinator = SimpleNamespace(async_add_watch_listener=Mock())
+    coordinator = SimpleNamespace(
+        async_add_watch_listener=Mock(),
+        rule_health=Mock(return_value=RuleHealthData()),
+    )
     entity = EmailWatchEventEntity(
         coordinator,
         entry,
@@ -82,3 +86,42 @@ def test_watch_rename_preserves_identity_and_emits_bounded_payload() -> None:
         EVENT_TYPE_NEW_MATCHING_EMAIL, payload
     )
     assert "body" not in payload
+
+
+def test_watch_exposes_pause_and_query_health_without_filter_values() -> None:
+    """Watch attributes expose actionable health without private filter content."""
+    entry = SimpleNamespace(
+        entry_id="entry-1", data={"email": "user@example.com"}, options={}
+    )
+    health = RuleHealthData(
+        status="Error",
+        last_successful_check="2026-07-28T09:00:00+00:00",
+        last_error_at="2026-07-28T10:00:00+00:00",
+        last_error_type="FolderQueryError",
+        last_error="Configured folder could not be queried",
+    )
+    coordinator = SimpleNamespace(rule_health=Mock(return_value=health))
+    entity = EmailWatchEventEntity(
+        coordinator,
+        entry,
+        {
+            "id": "watch-uuid",
+            "name": "RSA",
+            "folder": "Receipts",
+            "enabled": True,
+            "catch_up": True,
+            "filters": {"from": "private.example"},
+        },
+    )
+
+    assert entity.extra_state_attributes == {
+        "folder": "Receipts",
+        "enabled": True,
+        "catch_up": True,
+        "rule_status": "Error",
+        "last_successful_check": "2026-07-28T09:00:00+00:00",
+        "last_error_at": "2026-07-28T10:00:00+00:00",
+        "last_error_type": "FolderQueryError",
+        "last_error": "Configured folder could not be queried",
+    }
+    assert "private.example" not in str(entity.extra_state_attributes)

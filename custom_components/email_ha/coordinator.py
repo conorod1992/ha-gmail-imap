@@ -56,6 +56,17 @@ class SearchCountData:
 
 
 @dataclass(slots=True)
+class RuleHealthData:
+    """Privacy-safe health state for one user-managed rule."""
+
+    status: str = "Unknown"
+    last_successful_check: str | None = None
+    last_error_at: str | None = None
+    last_error_type: str | None = None
+    last_error: str | None = None
+
+
+@dataclass(slots=True)
 class EmailData:
     """Current read-only mailbox state for one account."""
 
@@ -113,6 +124,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         self._restored_folders: set[str] = set()
         self._custom_last_new_match: dict[str, str] = {}
         self._watch_last_new_match: dict[str, str] = {}
+        self._rule_health: dict[str, RuleHealthData] = {}
         self._state_store = EmailStateStore(hass, config_entry.entry_id)
 
         super().__init__(
@@ -186,6 +198,62 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
     def persisted_folder_count(self) -> int:
         """Return the number of durable folder UID baselines."""
         return len(self._folder_uid_state)
+
+    def rule_health(self, rule_id: str) -> RuleHealthData:
+        """Return privacy-safe health for one custom sensor or Email watch."""
+        return self._rule_health.get(rule_id, RuleHealthData())
+
+    def _set_rule_success(self, rule_id: str, *, checked_at: str | None = None) -> None:
+        """Mark a rule healthy while retaining its most recent historical error."""
+        if not rule_id:
+            return
+        previous = self._rule_health.get(rule_id, RuleHealthData())
+        self._rule_health[rule_id] = RuleHealthData(
+            status="Healthy",
+            last_successful_check=checked_at or datetime.now(timezone.utc).isoformat(),
+            last_error_at=previous.last_error_at,
+            last_error_type=previous.last_error_type,
+            last_error=previous.last_error,
+        )
+
+    def _set_rule_error(self, rule_id: str, err: Exception, message: str) -> None:
+        """Mark a rule failed without storing exception text or filter values."""
+        if not rule_id:
+            return
+        previous = self._rule_health.get(rule_id, RuleHealthData())
+        self._rule_health[rule_id] = RuleHealthData(
+            status="Error",
+            last_successful_check=previous.last_successful_check,
+            last_error_at=datetime.now(timezone.utc).isoformat(),
+            last_error_type=type(err).__name__,
+            last_error=message,
+        )
+
+    def _set_rule_folder_error(self, rule_id: str) -> None:
+        """Mark a rule whose configured folder could not be queried."""
+        if not rule_id:
+            return
+        previous = self._rule_health.get(rule_id, RuleHealthData())
+        self._rule_health[rule_id] = RuleHealthData(
+            status="Error",
+            last_successful_check=previous.last_successful_check,
+            last_error_at=datetime.now(timezone.utc).isoformat(),
+            last_error_type="FolderQueryError",
+            last_error="Configured folder could not be queried",
+        )
+
+    def _set_rule_paused(self, rule_id: str) -> None:
+        """Expose a disabled watch as paused rather than failed."""
+        if not rule_id:
+            return
+        previous = self._rule_health.get(rule_id, RuleHealthData())
+        self._rule_health[rule_id] = RuleHealthData(
+            status="Paused",
+            last_successful_check=previous.last_successful_check,
+            last_error_at=previous.last_error_at,
+            last_error_type=previous.last_error_type,
+            last_error=previous.last_error,
+        )
 
     @callback
     def async_add_new_email_listener(
@@ -377,6 +445,8 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                     [str(message.get("uid", "")) for message in arrivals[folder]],
                     tokens,
                 )
+                if is_watch:
+                    self._set_rule_success(definition_id, checked_at=observed_at)
                 for message in arrivals[folder]:
                     if str(message.get("uid", "")) not in matching_uids:
                         continue
@@ -389,6 +459,12 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                     else:
                         self._custom_last_new_match[definition_id] = observed_at
             except (ImapClientError, ValueError) as err:
+                if is_watch:
+                    self._set_rule_error(
+                        definition_id,
+                        err,
+                        "Email watch query failed",
+                    )
                 _LOGGER.warning(
                     "Unable to match filtered definition %s for %s: %s",
                     definition_id,
@@ -483,6 +559,25 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             ):
                 folder_statuses[folder] = status
 
+        checked_at = datetime.now(timezone.utc).isoformat()
+        for watch in self.email_watches:
+            watch_id = str(watch.get("id", ""))
+            if not watch_id:
+                continue
+            if not watch.get("enabled", True):
+                self._set_rule_paused(watch_id)
+                continue
+            folder = str(watch.get("folder", DEFAULT_FOLDER))
+            if folder not in folder_statuses:
+                self._set_rule_folder_error(watch_id)
+                continue
+            try:
+                build_structured_search_tokens(watch.get("filters", {}))
+            except ValueError as err:
+                self._set_rule_error(watch_id, err, "Email watch filter is invalid")
+            else:
+                self._set_rule_success(watch_id, checked_at=checked_at)
+
         # Generic New email deliberately retains its no-replay startup semantics.
         new_emails = await self._async_detect_new_emails(client, monitored_status)
 
@@ -525,6 +620,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                         )
                     newest = newest_metadata[cache_key]
             except (ImapClientError, ValueError) as err:
+                self._set_rule_error(sensor_id, err, "Custom sensor query failed")
                 _LOGGER.warning(
                     "Unable to update custom sensor %s for %s: %s",
                     sensor_id,
@@ -533,6 +629,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                 )
                 custom_counts[sensor_id] = SearchCountData()
             else:
+                self._set_rule_success(sensor_id)
                 custom_counts[sensor_id] = self._count_data(
                     count,
                     newest_uid,
