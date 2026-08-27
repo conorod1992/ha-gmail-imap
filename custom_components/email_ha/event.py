@@ -109,9 +109,7 @@ class EmailWatchEventEntity(EventEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Expose watch state, persisted match time, and privacy-safe rule health."""
         health = self._coordinator.rule_health(self._watch_id)
-        last_matches = getattr(
-            self._coordinator, "_watch_last_new_match", {}
-        )  # noqa: SLF001 - read-only view of coordinator's persisted watch state
+        last_matches = getattr(self._coordinator, "_watch_last_new_match", {})
         return {
             "folder": self._watch.get(CONF_FOLDER, DEFAULT_FOLDER),
             "enabled": bool(self._watch.get("enabled", True)),
