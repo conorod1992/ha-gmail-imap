@@ -102,9 +102,7 @@ def test_watch_exposes_pause_and_query_health_without_filter_values() -> None:
     )
     coordinator = SimpleNamespace(
         rule_health=Mock(return_value=health),
-        _watch_last_new_match={
-            "watch-uuid": "2026-07-28T09:30:00+00:00"
-        },
+        _watch_last_new_match={"watch-uuid": "2026-07-28T09:30:00+00:00"},
     )
     entity = EmailWatchEventEntity(
         coordinator,
