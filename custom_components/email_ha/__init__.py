@@ -61,6 +61,7 @@ from .search import (
     ATTACHMENT_STATES,
     GMAIL_CATEGORIES,
     IMPORTANT_STATES,
+    MATCH_MODES,
     READ_STATES,
     RELATIVE_DATE_RANGES,
     STARRED_STATES,
@@ -96,6 +97,7 @@ FIND_EMAILS_SCHEMA = vol.Schema(
         vol.Optional(SERVICE_ATTR_FOLDER, default=DEFAULT_FOLDER): vol.All(
             cv.string, validate_imap_folder
         ),
+        vol.Optional("match_mode", default="all"): vol.In(MATCH_MODES),
         vol.Optional("from"): cv.string,
         vol.Optional("to"): cv.string,
         vol.Optional("cc"): cv.string,

@@ -49,6 +49,7 @@ from .search import (
     ATTACHMENT_STATES,
     GMAIL_CATEGORIES,
     IMPORTANT_STATES,
+    MATCH_MODES,
     READ_STATES,
     RELATIVE_DATE_RANGES,
     STARRED_STATES,
@@ -61,6 +62,7 @@ from .search import (
 _LOGGER = logging.getLogger(__name__)
 
 _COMMON_FILTER_FIELDS = (
+    "match_mode",
     "from",
     "subject",
     "read_state",
@@ -143,6 +145,9 @@ def _custom_common_schema(
         vol.Required(
             CONF_FOLDER, default=values.get(CONF_FOLDER, DEFAULT_FOLDER)
         ): _folder_selector(folders),
+        vol.Required("match_mode", default=filters.get("match_mode", "all")): _select(
+            MATCH_MODES, "match_mode"
+        ),
         vol.Optional("from", default=filters.get("from", "")): selector.TextSelector(),
         vol.Optional(
             "subject", default=filters.get("subject", "")

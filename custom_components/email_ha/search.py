@@ -46,6 +46,7 @@ RELATIVE_DATE_RANGES = (
     "last_7_days",
     "last_30_days",
 )
+MATCH_MODES = ("all", "any")
 
 
 def summarize_structured_filters(
@@ -53,6 +54,7 @@ def summarize_structured_filters(
 ) -> str:
     """Return a concise owner-facing description of every active filter."""
     normalized = normalize_structured_filters(filters)
+    match_any = normalized.get("match_mode") == "any"
     details: list[str] = []
     if folder:
         details.append("Inbox" if folder.upper() == "INBOX" else folder)
@@ -97,9 +99,10 @@ def summarize_structured_filters(
     )
     if not details:
         return "All email"
+    prefix = "Match any condition · " if match_any else ""
     if short and len(details) > 4:
-        return " · ".join(details[:4]) + f" · +{len(details) - 4} more"
-    return " · ".join(details)
+        return prefix + " · ".join(details[:4]) + f" · +{len(details) - 4} more"
+    return prefix + " · ".join(details)
 
 
 def validate_imap_folder(value: Any) -> str:
@@ -152,6 +155,11 @@ def _imap_date(value: Any, field: str) -> str | None:
 def normalize_structured_filters(filters: Mapping[str, Any]) -> dict[str, Any]:
     """Return populated structured filters in a response-safe form."""
     normalized: dict[str, Any] = {}
+    match_mode = filters.get("match_mode", "all")
+    if match_mode not in MATCH_MODES:
+        raise ValueError("Invalid match_mode")
+    if match_mode != "all":
+        normalized["match_mode"] = match_mode
     for field in _TEXT_FILTERS:
         if value := _clean_text(filters.get(field), field):
             normalized[field] = value
@@ -203,11 +211,36 @@ def validate_search_tokens(tokens: Sequence[str]) -> list[str]:
     return result
 
 
+def _build_any_search_tokens(
+    filters: Mapping[str, Any], *, current_date: date | None = None
+) -> list[str]:
+    """Build a nested IMAP OR expression from independent structured conditions."""
+    clauses = [
+        build_structured_search_tokens({field: value}, current_date=current_date)
+        for field, value in filters.items()
+    ]
+    if not clauses:
+        return ["ALL"]
+    if len(clauses) == 1:
+        return clauses[0]
+
+    def grouped(clause: Sequence[str]) -> str:
+        return clause[0] if len(clause) == 1 else f"({' '.join(clause)})"
+
+    combined = clauses[-1]
+    for clause in reversed(clauses[:-1]):
+        combined = ["OR", grouped(clause), grouped(combined)]
+    return validate_search_tokens(combined)
+
+
 def build_structured_search_tokens(
     filters: Mapping[str, Any], *, current_date: date | None = None
 ) -> list[str]:
     """Translate populated structured filters to AND-combined IMAP tokens."""
     normalized = normalize_structured_filters(filters)
+    if normalized.pop("match_mode", "all") == "any":
+        return _build_any_search_tokens(normalized, current_date=current_date)
+
     tokens: list[str] = []
     for field, criterion in _TEXT_FILTERS.items():
         if value := normalized.get(field):
