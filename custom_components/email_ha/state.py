@@ -78,7 +78,10 @@ class EmailStateStore:
                     "uidvalidity": uid_validity,
                     "last_seen_uid": last_seen_uid,
                 }
-                for folder, (uid_validity, last_seen_uid) in self.folder_uid_state.items()
+                for folder, (
+                    uid_validity,
+                    last_seen_uid,
+                ) in self.folder_uid_state.items()
             },
             "custom_last_new_match": dict(self.custom_last_new_match),
             "watch_last_new_match": dict(self.watch_last_new_match),
