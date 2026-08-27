@@ -39,6 +39,7 @@ from .state import EmailStateStore
 _LOGGER = logging.getLogger(__name__)
 
 _FOLDER_REFRESH_INTERVAL = 86400
+_CATCH_UP_MARKER = "_email_ha_caught_up"
 
 
 @dataclass(slots=True)
@@ -65,7 +66,7 @@ class EmailData:
     gmail_counts: dict[str, SearchCountData] = field(default_factory=dict)
     custom_counts: dict[str, SearchCountData] = field(default_factory=dict)
     new_emails: list[dict[str, Any]] = field(default_factory=list)
-    watch_matches: list[tuple[str, dict[str, Any], bool]] = field(default_factory=list)
+    watch_matches: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
 
     @property
     def latest_email(self) -> dict[str, Any] | None:
@@ -151,10 +152,15 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
     @callback
     def _schedule_state_save(self) -> None:
         """Persist only UID baselines and timestamps, never message content."""
-        self._state_store.folder_uid_state = dict(self._folder_uid_state)
-        self._state_store.custom_last_new_match = dict(self._custom_last_new_match)
-        self._state_store.watch_last_new_match = dict(self._watch_last_new_match)
-        self._state_store.async_schedule_save()
+        state_store = getattr(self, "_state_store", None)
+        if state_store is None:
+            return
+        state_store.folder_uid_state = dict(self._folder_uid_state)
+        state_store.custom_last_new_match = dict(self._custom_last_new_match)
+        state_store.watch_last_new_match = dict(
+            getattr(self, "_watch_last_new_match", {})
+        )
+        state_store.async_schedule_save()
 
     @property
     def folder(self) -> str:
@@ -286,28 +292,27 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         status: dict[str, int],
         *,
         fetch_messages: bool,
-        allow_catch_up: bool,
-    ) -> tuple[list[dict[str, Any]], bool]:
+        allow_catch_up: bool = False,
+    ) -> list[dict[str, Any]]:
         """Detect filtered arrivals, optionally resuming a persisted restart baseline."""
         uid_validity = status.get("uidvalidity")
         highest_uid = max(0, status.get("uidnext", 1) - 1)
         previous = self._folder_uid_state.get(folder)
-        restored = folder in self._restored_folders
-        self._restored_folders.discard(folder)
+        restored_folders = getattr(self, "_restored_folders", set())
+        restored = folder in restored_folders
+        restored_folders.discard(folder)
 
         if previous is None or previous[0] != uid_validity:
             self._folder_uid_state[folder] = (uid_validity, highest_uid)
-            return [], False
+            return []
 
         last_seen = previous[1]
         self._folder_uid_state[folder] = (uid_validity, highest_uid)
         if highest_uid <= last_seen or not fetch_messages:
-            return [], False
+            return []
 
-        # Persisted state is used only for explicitly opted-in watches. Otherwise
-        # startup keeps the historical no-replay behavior and simply advances.
         if restored and not allow_catch_up:
-            return [], False
+            return []
 
         limit = MAX_CATCH_UP_EVENTS if restored else MAX_NEW_EMAIL_EVENTS
         messages, match_count = await client.get_new_emails(folder, last_seen, limit)
@@ -319,7 +324,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                 self._email,
                 limit,
             )
-        return messages, restored
+        return messages
 
     @staticmethod
     def _count_data(
@@ -344,11 +349,14 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         self,
         client: ImapClient,
         arrivals: dict[str, list[dict[str, Any]]],
-        catch_up_only_folders: set[str],
-    ) -> list[tuple[str, dict[str, Any], bool]]:
+        catch_up_only_folders: set[str] | None = None,
+    ) -> list[tuple[str, dict[str, Any]]]:
         """Match bounded arrivals, restricting restart batches to opted-in watches."""
-        watch_matches: list[tuple[str, dict[str, Any], bool]] = []
+        catch_up_only_folders = catch_up_only_folders or set()
+        watch_matches: list[tuple[str, dict[str, Any]]] = []
         observed_at = datetime.now(timezone.utc).isoformat()
+        if not hasattr(self, "_watch_last_new_match"):
+            self._watch_last_new_match = {}
         for definition, is_watch in (
             *((sensor, False) for sensor in self.custom_sensors),
             *((watch, True) for watch in self.email_watches),
@@ -375,7 +383,10 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                     if str(message.get("uid", "")) not in matching_uids:
                         continue
                     if is_watch:
-                        watch_matches.append((definition_id, message, caught_up))
+                        payload_message = dict(message)
+                        if caught_up:
+                            payload_message[_CATCH_UP_MARKER] = True
+                        watch_matches.append((definition_id, payload_message))
                         self._watch_last_new_match[definition_id] = observed_at
                     else:
                         self._custom_last_new_match[definition_id] = observed_at
@@ -392,13 +403,18 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         self, client: ImapClient, folder: str, *, required: bool
     ) -> dict[str, int] | None:
         """Read folder status and maintain an actionable repair for missing folders."""
+        entry = getattr(self, "config_entry", None)
+        hass = getattr(self, "hass", None)
         try:
             status = await client.get_folder_status(folder)
         except ImapFolderError:
-            if self.config_entry is not None:
-                report_folder_unavailable(self.hass, self.config_entry, folder)
+            if entry is not None and hass is not None:
+                report_folder_unavailable(hass, entry, folder)
             if required:
                 raise
+            _LOGGER.warning(
+                "Configured folder %s is unavailable for %s", folder, self._email
+            )
             return None
         except (ImapClientError, ValueError) as err:
             if required:
@@ -410,8 +426,8 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                 type(err).__name__,
             )
             return None
-        if self.config_entry is not None:
-            clear_folder_unavailable(self.hass, self.config_entry, folder)
+        if entry is not None and hass is not None:
+            clear_folder_unavailable(hass, entry, folder)
         return status
 
     async def _async_fetch_data(self, client: ImapClient) -> EmailData:
@@ -473,15 +489,17 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         arrivals: dict[str, list[dict[str, Any]]] = {}
         catch_up_only_folders: set[str] = set()
         for folder, status in folder_statuses.items():
-            messages, caught_up = await self._async_detect_folder_new_emails(
+            was_restored = folder in getattr(self, "_restored_folders", set())
+            allow_catch_up = folder in catch_up_folders
+            messages = await self._async_detect_folder_new_emails(
                 client,
                 folder,
                 status,
                 fetch_messages=folder in active_filtered_folders,
-                allow_catch_up=folder in catch_up_folders,
+                allow_catch_up=allow_catch_up,
             )
             arrivals[folder] = messages
-            if caught_up and messages:
+            if was_restored and allow_catch_up and messages:
                 catch_up_only_folders.add(folder)
 
         watch_matches = await self._async_match_new_messages(
@@ -555,11 +573,12 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
 
     @callback
     def _notify_watch_matches(
-        self, matches: list[tuple[str, dict[str, Any], bool]]
+        self, matches: list[tuple[str, dict[str, Any]]]
     ) -> None:
         """Deliver bounded, body-free matches to their watch EventEntities."""
         definitions = {str(watch.get("id", "")): watch for watch in self.email_watches}
-        for watch_id, message, caught_up in matches:
+        last_matches = getattr(self, "_watch_last_new_match", {})
+        for watch_id, message in matches:
             watch = definitions.get(watch_id)
             if watch is None or not watch.get("enabled", True):
                 continue
@@ -575,8 +594,8 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                 "date": message.get("date"),
                 "watch_id": watch_id,
                 "watch_name": watch.get("name", "Email watch"),
-                "caught_up": caught_up,
-                "last_new_match": self._watch_last_new_match.get(watch_id),
+                "caught_up": bool(message.get(_CATCH_UP_MARKER, False)),
+                "last_new_match": last_matches.get(watch_id),
             }
             for listener in tuple(self._watch_listeners.get(watch_id, ())):
                 listener(payload)
