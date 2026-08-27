@@ -29,7 +29,7 @@ jobs:
               text = file_path.read_text()
               count = text.count(old)
               if count != 1:
-                  raise RuntimeError(f"Expected one match in {path}, found {count}: {old[:80]!r}")
+                  raise RuntimeError(f"Expected one match in {path}, found {count}: {old[:100]!r}")
               file_path.write_text(text.replace(old, new, 1))
 
           search_path = "custom_components/email_ha/search.py"
@@ -144,18 +144,13 @@ jobs:
           readme_path = "README.md"
           replace_one(
               readme_path,
-              'The first form contains common filters, including attachment presence. Turn on Add more filters for To, CC, body text, any text, attachment filename, and date filters. Blank fields are ignored and all filled conditions must match.\n',
-              'The first form contains common filters, including attachment presence. Turn on Add more filters for To, CC, body text, any text, attachment filename, and date filters. Blank fields are ignored. Choose **All conditions** for the existing AND behaviour, or **Any condition** when one filled filter is enough to match.\n',
+              "Blank fields are ignored and all filled conditions must match.",
+              "Blank fields are ignored. Choose **All conditions** for the existing AND behaviour, or **Any condition** when one filled filter is enough to match.",
           )
           replace_one(
               readme_path,
-              '`email_ha.find_emails` is the normal action. It provides friendly From, To, CC, Subject, Body, Any text, read, starred, importance, category, and date fields. Blank filters are ignored; filled filters combine with AND.\n',
-              '`email_ha.find_emails` is the normal action. It provides friendly From, To, CC, Subject, Body, Any text, read, starred, importance, category, and date fields. Blank filters are ignored. `match_mode` defaults to `all` for the existing AND behaviour; set it to `any` to match when at least one filled condition is true.\n',
-          )
-          replace_one(
-              readme_path,
-              '      from: rsa.ie\n      subject: renewal\n      read_state: unread\n',
-              '      from: rsa.ie\n      subject: renewal\n      read_state: unread\n',
+              "Blank filters are ignored; filled filters combine with AND.",
+              "Blank filters are ignored. `match_mode` defaults to `all` for the existing AND behaviour; set it to `any` to match when at least one filled condition is true.",
           )
 
           manifest_path = Path("custom_components/email_ha/manifest.json")
