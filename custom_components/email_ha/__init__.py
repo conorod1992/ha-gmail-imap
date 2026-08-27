@@ -339,6 +339,7 @@ def _register_services(hass: HomeAssistant) -> None:
             "folder": folder,
             "filters": filters,
             "count": len(emails),
+            "latest_email": emails[0] if emails else None,
             "emails": emails,
             "truncated": len(emails) == call.data[SERVICE_ATTR_MAX_RESULTS],
         }
