@@ -62,6 +62,7 @@ from .search import (
     GMAIL_CATEGORIES,
     IMPORTANT_STATES,
     READ_STATES,
+    RELATIVE_DATE_RANGES,
     STARRED_STATES,
     build_structured_search_tokens,
     normalize_structured_filters,
@@ -109,6 +110,7 @@ FIND_EMAILS_SCHEMA = vol.Schema(
         vol.Optional("gmail_category", default="any"): vol.In(
             ("any", *GMAIL_CATEGORIES)
         ),
+        vol.Optional("relative_date", default="any"): vol.In(RELATIVE_DATE_RANGES),
         vol.Optional("since"): cv.string,
         vol.Optional("before"): cv.string,
         vol.Optional("on"): cv.string,
@@ -161,6 +163,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         custom_sensors=entry.options.get(CONF_CUSTOM_SENSORS, []),
         email_watches=entry.options.get(CONF_EMAIL_WATCHES, []),
     )
+    await coordinator.async_load_state()
     try:
         await coordinator.async_config_entry_first_refresh()
     except ConfigEntryAuthFailed:

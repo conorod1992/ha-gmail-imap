@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
+
+from homeassistant.util import dt as dt_util
 
 from .const import MAX_SEARCH_CRITERIA_CHARS, MAX_SEARCH_TOKENS
 
@@ -36,6 +38,14 @@ READ_STATES = ("any", "unread", "read")
 STARRED_STATES = ("any", "starred", "not_starred")
 IMPORTANT_STATES = ("any", "important", "not_important")
 ATTACHMENT_STATES = ("any", "has_attachment", "no_attachment")
+RELATIVE_DATE_RANGES = (
+    "any",
+    "today",
+    "yesterday",
+    "last_24_hours",
+    "last_7_days",
+    "last_30_days",
+)
 
 
 def summarize_structured_filters(
@@ -68,6 +78,13 @@ def summarize_structured_filters(
         "attachment_state": {
             "has_attachment": "Has attachment",
             "no_attachment": "No attachment",
+        },
+        "relative_date": {
+            "today": "Received today",
+            "yesterday": "Received yesterday",
+            "last_24_hours": "Received in the last 24 hours",
+            "last_7_days": "Received in the last 7 days",
+            "last_30_days": "Received in the last 30 days",
         },
     }
     details.extend(
@@ -151,6 +168,7 @@ def normalize_structured_filters(filters: Mapping[str, Any]) -> dict[str, Any]:
         ("starred_state", STARRED_STATES),
         ("important_state", IMPORTANT_STATES),
         ("attachment_state", ATTACHMENT_STATES),
+        ("relative_date", RELATIVE_DATE_RANGES),
     ):
         value = filters.get(field, "any")
         if value not in allowed:
@@ -162,6 +180,10 @@ def normalize_structured_filters(filters: Mapping[str, Any]) -> dict[str, Any]:
         if category not in GMAIL_CATEGORIES:
             raise ValueError("Invalid Gmail category")
         normalized["gmail_category"] = category
+    if normalized.get("relative_date") and any(
+        normalized.get(field) for field in _DATE_FILTERS
+    ):
+        raise ValueError("Relative date cannot be combined with exact date filters")
     return normalized
 
 
@@ -181,7 +203,9 @@ def validate_search_tokens(tokens: Sequence[str]) -> list[str]:
     return result
 
 
-def build_structured_search_tokens(filters: Mapping[str, Any]) -> list[str]:
+def build_structured_search_tokens(
+    filters: Mapping[str, Any], *, current_date: date | None = None
+) -> list[str]:
     """Translate populated structured filters to AND-combined IMAP tokens."""
     normalized = normalize_structured_filters(filters)
     tokens: list[str] = []
@@ -206,6 +230,27 @@ def build_structured_search_tokens(filters: Mapping[str, Any]) -> list[str]:
             tokens.extend((criterion, formatted))
 
     gmail_terms: list[str] = []
+    relative_date = normalized.get("relative_date")
+    today = current_date or dt_util.now().date()
+    if relative_date == "today":
+        tokens.extend(("SINCE", _imap_date(today, "relative_date") or ""))
+    elif relative_date == "yesterday":
+        yesterday = today - timedelta(days=1)
+        tokens.extend(
+            (
+                "SINCE",
+                _imap_date(yesterday, "relative_date") or "",
+                "BEFORE",
+                _imap_date(today, "relative_date") or "",
+            )
+        )
+    elif relative_date == "last_24_hours":
+        gmail_terms.append("newer_than:1d")
+    elif relative_date == "last_7_days":
+        gmail_terms.append("newer_than:7d")
+    elif relative_date == "last_30_days":
+        gmail_terms.append("newer_than:30d")
+
     if category := normalized.get("gmail_category"):
         gmail_terms.append(f"category:{category}")
     important_state = normalized.get("important_state")

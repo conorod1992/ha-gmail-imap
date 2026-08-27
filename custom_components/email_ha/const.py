@@ -12,6 +12,7 @@ CONF_GMAIL_ENTITIES = "gmail_entities"
 CONF_CUSTOM_SENSORS = "custom_sensors"
 CONF_EMAIL_WATCHES = "email_watches"
 CONF_MONITORED_FOLDER = "monitored_folder"
+CONF_CATCH_UP = "catch_up"
 
 GMAIL_IMAP_HOST = "imap.gmail.com"
 GMAIL_IMAP_PORT = 993
@@ -26,6 +27,7 @@ IDLE_PUSH_WAIT_TIMEOUT = 10 * 60
 IDLE_RECONNECT_DELAYS = [5, 10, 20, 40, 80, 120]
 IDLE_FALLBACK_REFRESH_INTERVAL = 15 * 60
 MAX_NEW_EMAIL_EVENTS = 25
+MAX_CATCH_UP_EVENTS = 25
 
 # Entity attribute keys
 ATTR_SENDER_NAME = "sender_name"
