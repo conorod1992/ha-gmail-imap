@@ -24,6 +24,7 @@ from homeassistant.helpers import (
 from homeassistant.helpers.entity_registry import RegistryEntryDisabler
 
 from .const import (
+    CONF_CATCH_UP,
     CONF_CUSTOM_SENSORS,
     CONF_EMAIL,
     CONF_EMAIL_WATCHES,
@@ -49,6 +50,7 @@ from .search import (
     GMAIL_CATEGORIES,
     IMPORTANT_STATES,
     READ_STATES,
+    RELATIVE_DATE_RANGES,
     STARRED_STATES,
     build_structured_search_tokens,
     normalize_structured_filters,
@@ -73,6 +75,7 @@ _ADVANCED_FILTER_FIELDS = (
     "body",
     "text",
     "attachment_filename",
+    "relative_date",
     "since",
     "before",
     "on",
@@ -166,6 +169,9 @@ def _custom_common_schema(
         fields[vol.Required("enabled", default=values.get("enabled", True))] = (
             selector.BooleanSelector()
         )
+        fields[
+            vol.Optional(CONF_CATCH_UP, default=values.get(CONF_CATCH_UP, False))
+        ] = selector.BooleanSelector()
     return vol.Schema(fields)
 
 
@@ -174,6 +180,11 @@ def _custom_advanced_schema(values: dict[str, Any]) -> vol.Schema:
     filters = values.get("filters", {})
     fields: dict[vol.Optional, Any] = {}
     for field in _ADVANCED_FILTER_FIELDS:
+        if field == "relative_date":
+            fields[vol.Optional(field, default=filters.get(field, "any"))] = _select(
+                RELATIVE_DATE_RANGES, "relative_date"
+            )
+            continue
         marker = (
             vol.Optional(field, default=filters[field])
             if filters.get(field)
@@ -196,15 +207,19 @@ def _custom_sensor_summary(sensor_config: dict[str, Any]) -> str:
         short=True,
     )
     disabled = " — Disabled" if sensor_config.get("enabled", True) is False else ""
-    return f"{sensor_config.get('name', 'Custom sensor')} — {summary}{disabled}"
+    catch_up = " · Catch up after restart" if sensor_config.get(CONF_CATCH_UP) else ""
+    return f"{sensor_config.get('name', 'Custom sensor')} — {summary}{catch_up}{disabled}"
 
 
 def _full_rule_summary(draft: dict[str, Any]) -> str:
     """Return the complete deterministic explanation shown on edit forms."""
-    return summarize_structured_filters(
+    summary = summarize_structured_filters(
         draft.get("filters", {}),
         folder=str(draft.get(CONF_FOLDER, DEFAULT_FOLDER)),
     )
+    if draft.get(CONF_CATCH_UP):
+        return f"{summary} · Catch up after Home Assistant restarts"
+    return summary
 
 
 def _ordered_gmail_entities(selected: set[str]) -> list[str]:
@@ -797,6 +812,7 @@ class EmailHAOptionsFlow(OptionsFlow):
                     CONF_FOLDER: folder,
                     "filters": {**advanced, **common},
                     "enabled": bool(user_input.get("enabled", True)),
+                    CONF_CATCH_UP: bool(user_input.get(CONF_CATCH_UP, False)),
                 }
                 if user_input.get("more_filters"):
                     self._watch_test_after_advanced = bool(
