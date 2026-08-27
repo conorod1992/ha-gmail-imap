@@ -340,7 +340,7 @@ A custom sensor can expose details such as:
 
 It can also record when Email HA last observed a genuinely new matching email.
 
-That "last new match" value only tracks new messages seen while the integration is running and resets when the integration is reloaded.
+That "last new match" value tracks new matching arrivals observed by Email HA and is persisted across integration reloads and Home Assistant restarts.
 
 Up to **20 custom email sensors** can be configured per Gmail account.
 
@@ -456,13 +456,9 @@ Email watch events include basic email details such as:
 
 They do **not** include the email body or your private filter values.
 
-Existing matching emails are not replayed when:
+By default, Email watches do not replay matching messages that arrived while Email HA was stopped or reloaded. A watch with **Catch up after restart** enabled can instead emit a bounded batch of matching arrivals since its persisted folder baseline after a restart or reload.
 
-- Home Assistant starts;
-- Email HA reloads;
-- a new watch is created.
-
-Only newly detected arrivals fire the watch.
+Creating a new watch never replays older matching email.
 
 ---
 
@@ -843,11 +839,7 @@ Email HA records Gmail's folder tracking values when it starts, then only treats
 
 This prevents situations such as deleting or moving the newest email from causing an older message to be mistaken for a new arrival.
 
-Existing messages are not emitted when:
-
-- Home Assistant starts;
-- the integration reloads;
-- a new Email watch is created.
+The generic **New email** event does not replay messages from before Home Assistant starts or the integration reloads. Email watches also default to no replay, but a watch with **Catch up after restart** enabled can emit a bounded batch of newly arrived matching messages since its persisted baseline after a restart or reload. Creating a new watch never replays older messages.
 
 Multiple newly detected messages are emitted in arrival order.
 
@@ -863,7 +855,7 @@ For users familiar with IMAP:
 - it uses `UIDNEXT` to establish a clean baseline;
 - UIDs are only meaningful within one folder and one UIDVALIDITY generation;
 - reconnecting IMAP IDLE keeps the existing baseline;
-- reloading the integration creates a new baseline;
+- reloading the integration restores persisted filtered-folder baselines used by Email watch catch-up;
 - copying or moving a message to another folder gives it folder-specific identity.
 
 ## Gmail-specific search behaviour
@@ -952,15 +944,9 @@ to enable additional Gmail entities.
 
 ## An Email watch did not fire for an existing email
 
-This is expected.
+This is expected for a newly created watch: Email HA establishes a clean baseline and does not replay older matching messages.
 
-Email watches only react to newly detected arrivals.
-
-Existing matching messages are deliberately not replayed when:
-
-- Home Assistant starts;
-- Email HA reloads;
-- a watch is created.
+After a later Home Assistant restart or Email HA reload, the watch still defaults to no replay. If **Catch up after restart** is enabled for that watch, Email HA can instead emit a bounded batch of matching arrivals that occurred after its persisted baseline.
 
 ## A folder is unavailable
 
