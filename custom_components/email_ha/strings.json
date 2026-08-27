@@ -76,7 +76,7 @@
       },
       "email_watches": {
         "title": "Email watches",
-        "description": "Add, edit, duplicate, or delete a watch that fires an event only when a newly arriving email matches.",
+        "description": "Add, edit, duplicate, pause, or delete a watch that fires an event when arriving email matches.",
         "data": {"manage_action": "Choose an action"}
       },
       "custom_sensor_common": {
@@ -105,13 +105,14 @@
       },
       "custom_sensor_advanced": {
         "title": "More custom sensor filters",
-        "description": "These optional conditions are also combined with AND. Body and text matching happen on Gmail's server without downloading message bodies into Home Assistant. Current rule: {summary}.",
+        "description": "These optional conditions are also combined with AND. Body and text matching happen on Gmail's server without downloading message bodies into Home Assistant. Choose either a relative date or exact date filters, not both. Current rule: {summary}.",
         "data": {
           "to": "To contains",
           "cc": "CC contains",
           "body": "Body contains",
           "text": "Any text contains",
           "attachment_filename": "Attachment filename contains",
+          "relative_date": "Relative date",
           "since": "Since",
           "before": "Before",
           "on": "On",
@@ -137,15 +138,18 @@
       },
       "email_watch_common": {
         "title": "Email watch",
-        "description": "Fires an event when Email HA observes a newly arriving message that matches every filled filter. Existing mail is not replayed and message bodies are not included. Current rule: {summary}.",
+        "description": "Fires an event when Email HA observes an arriving message that matches every filled filter. Catch-up is optional and bounded; message bodies are never included in watch events. Current rule: {summary}.",
         "data": {
-          "name": "Name", "folder": "Folder", "from": "From contains", "subject": "Subject contains", "read_state": "Read state", "gmail_category": "Gmail category", "important_state": "Gmail importance", "starred_state": "Starred state", "attachment_state": "Attachment", "more_filters": "Add more filters", "test_filter": "Test filter", "enabled": "Enabled"
+          "name": "Name", "folder": "Folder", "from": "From contains", "subject": "Subject contains", "read_state": "Read state", "gmail_category": "Gmail category", "important_state": "Gmail importance", "starred_state": "Starred state", "attachment_state": "Attachment", "more_filters": "Add more filters", "test_filter": "Test filter", "enabled": "Enabled", "catch_up": "Catch up missed email after restart"
+        },
+        "data_description": {
+          "catch_up": "When enabled, Email HA persists a lightweight UID baseline and checks up to 25 messages that arrived while Home Assistant was offline. Existing mail from before the saved baseline is never replayed."
         }
       },
       "email_watch_advanced": {
         "title": "More email watch filters",
-        "description": "These optional conditions are combined with AND and checked only against newly detected messages. Current rule: {summary}.",
-        "data": {"to": "To contains", "cc": "CC contains", "body": "Body contains", "text": "Any text contains", "attachment_filename": "Attachment filename contains", "since": "Since", "before": "Before", "on": "On", "test_filter": "Test filter"}
+        "description": "These optional conditions are combined with AND. Choose either a relative date or exact date filters, not both. Current rule: {summary}.",
+        "data": {"to": "To contains", "cc": "CC contains", "body": "Body contains", "text": "Any text contains", "attachment_filename": "Attachment filename contains", "relative_date": "Relative date", "since": "Since", "before": "Before", "on": "On", "test_filter": "Test filter"}
       },
       "email_watch_action": {
         "title": "Manage email watch",
@@ -174,8 +178,8 @@
       }
     },
     "error": {
-      "invalid_custom_sensor": "Check the name, folder, filters, and dates. Control characters are not allowed.",
-      "invalid_email_watch": "Check the name, folder, filters, and dates. Control characters are not allowed.",
+      "invalid_custom_sensor": "Check the name, folder, filters, and dates. Relative and exact date filters cannot be combined.",
+      "invalid_email_watch": "Check the name, folder, filters, and dates. Relative and exact date filters cannot be combined.",
       "invalid_folder": "Choose a non-empty folder without control characters.",
       "filter_test_failed": "Email HA could not test this filter. Check the Gmail connection and try again. Your draft was kept."
     },
@@ -220,6 +224,9 @@
     "gmail_category": {
       "options": {"any": "Any", "primary": "Primary", "updates": "Updates", "promotions": "Promotions", "social": "Social", "forums": "Forums"}
     },
+    "relative_date": {
+      "options": {"any": "Any time", "today": "Today", "yesterday": "Yesterday", "last_24_hours": "Last 24 hours", "last_7_days": "Last 7 days", "last_30_days": "Last 30 days"}
+    },
     "manage_action": {
       "options": {"edit": "Edit", "duplicate": "Duplicate", "delete": "Delete", "enable": "Enable", "disable": "Disable"}
     }
@@ -242,6 +249,12 @@
       "latest_email": {"name": "Latest email"},
       "connection_status": {"name": "Connection status"},
       "last_successful_update": {"name": "Last successful update"}
+    }
+  },
+  "issues": {
+    "folder_unavailable": {
+      "title": "Gmail folder unavailable",
+      "description": "Email HA cannot access the configured Gmail folder `{folder}`. The folder may have been renamed or deleted. Open Email HA settings and choose an accessible folder, or restore the folder in Gmail."
     }
   },
   "services": {
