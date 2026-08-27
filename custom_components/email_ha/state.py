@@ -59,11 +59,11 @@ class EmailStateStore:
     def _load_matches(value: Any) -> dict[str, str]:
         if not isinstance(value, Mapping):
             return {}
-        result: dict[str, str] = {}
-        for key, timestamp in list(value.items())[:_MAX_MATCH_ENTRIES]:
-            if isinstance(key, str) and isinstance(timestamp, str):
-                result[key] = timestamp
-        return result
+        return {
+            key: timestamp
+            for key, timestamp in list(value.items())[:_MAX_MATCH_ENTRIES]
+            if isinstance(key, str) and isinstance(timestamp, str)
+        }
 
     @callback
     def async_schedule_save(self) -> None:
