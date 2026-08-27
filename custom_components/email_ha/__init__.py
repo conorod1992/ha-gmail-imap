@@ -315,6 +315,19 @@ async def _search_structured(
         raise _translate_imap_error(err) from err
 
 
+def _search_response_metadata(
+    emails: list[dict[str, Any]], *, max_results: int, include_body: bool
+) -> dict[str, Any]:
+    """Return small explicit fields that make bounded search results easy to consume."""
+    returned_count = len(emails)
+    return {
+        "has_matches": returned_count > 0,
+        "returned_count": returned_count,
+        "limit_reached": returned_count == max_results,
+        "body_included": include_body,
+    }
+
+
 def _register_services(hass: HomeAssistant) -> None:
     """Register one normal search, one advanced search, and explicit retrieval."""
     if hass.services.has_service(DOMAIN, SERVICE_FIND_EMAILS):
@@ -336,6 +349,11 @@ def _register_services(hass: HomeAssistant) -> None:
             include_body=call.data["include_body"],
             body_max_chars=call.data["body_max_chars"],
         )
+        metadata = _search_response_metadata(
+            emails,
+            max_results=call.data[SERVICE_ATTR_MAX_RESULTS],
+            include_body=call.data["include_body"],
+        )
         return {
             "account": _entry_for_coordinator(coordinator).data[CONF_EMAIL],
             "folder": folder,
@@ -343,7 +361,8 @@ def _register_services(hass: HomeAssistant) -> None:
             "count": len(emails),
             "latest_email": emails[0] if emails else None,
             "emails": emails,
-            "truncated": len(emails) == call.data[SERVICE_ATTR_MAX_RESULTS],
+            "truncated": metadata["limit_reached"],
+            **metadata,
         }
 
     async def handle_search_emails(call: ServiceCall) -> dict[str, Any]:
@@ -358,13 +377,19 @@ def _register_services(hass: HomeAssistant) -> None:
             include_body=call.data["include_body"],
             body_max_chars=call.data["body_max_chars"],
         )
+        metadata = _search_response_metadata(
+            emails,
+            max_results=call.data[SERVICE_ATTR_MAX_RESULTS],
+            include_body=call.data["include_body"],
+        )
         return {
             "account": _entry_for_coordinator(coordinator).data[CONF_EMAIL],
             "folder": folder,
             "search_criteria": criteria,
             "count": len(emails),
             "emails": emails,
-            "truncated": len(emails) == call.data[SERVICE_ATTR_MAX_RESULTS],
+            "truncated": metadata["limit_reached"],
+            **metadata,
         }
 
     async def handle_get_email_contents(call: ServiceCall) -> dict[str, Any]:
@@ -383,6 +408,8 @@ def _register_services(hass: HomeAssistant) -> None:
         return {
             "account": _entry_for_coordinator(coordinator).data[CONF_EMAIL],
             "folder": folder,
+            "uid": call.data["uid"],
+            "body_included": True,
             "message": message,
         }
 

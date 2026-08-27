@@ -97,6 +97,9 @@ async def test_find_emails_translates_filters_and_defaults_to_no_body(
     ]
     assert search.await_args.kwargs["include_body"] is False
     assert "plain_text_body" not in response["emails"][0]
+    assert response["has_matches"] is True
+    assert response["returned_count"] == 1
+    assert response["body_included"] is False
 
 
 @pytest.mark.asyncio
@@ -114,12 +117,14 @@ async def test_find_emails_exposes_latest_match_without_extra_search(
 
     assert response["latest_email"] == emails[0]
     assert response["emails"] == emails
+    assert response["returned_count"] == 2
+    assert response["limit_reached"] is False
     search.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_find_emails_latest_match_is_none_when_no_results(monkeypatch) -> None:
-    """An empty search has an explicit null latest-match convenience value."""
+    """An empty search has explicit no-match convenience values."""
     hass = _configured_hass()
     monkeypatch.setattr(
         "custom_components.email_ha._search_structured", AsyncMock(return_value=[])
@@ -130,6 +135,9 @@ async def test_find_emails_latest_match_is_none_when_no_results(monkeypatch) -> 
 
     assert response["latest_email"] is None
     assert response["emails"] == []
+    assert response["has_matches"] is False
+    assert response["returned_count"] == 0
+    assert response["limit_reached"] is False
 
 
 @pytest.mark.asyncio
@@ -140,12 +148,33 @@ async def test_find_emails_body_opt_in_and_limit_are_propagated(monkeypatch) -> 
     monkeypatch.setattr("custom_components.email_ha._search_structured", search)
     handler, schema = hass.services.registered[(DOMAIN, SERVICE_FIND_EMAILS)]
 
-    await handler(
+    response = await handler(
         SimpleNamespace(data=schema({"include_body": True, "body_max_chars": 321}))
     )
 
     assert search.await_args.kwargs["include_body"] is True
     assert search.await_args.kwargs["body_max_chars"] == 321
+    assert response["body_included"] is True
+
+
+@pytest.mark.asyncio
+async def test_find_emails_marks_limit_reached_without_claiming_total_count(
+    monkeypatch,
+) -> None:
+    """A full bounded page is explicit about possibly having more matches."""
+    hass = _configured_hass()
+    emails = [{"uid": "9"}, {"uid": "8"}]
+    monkeypatch.setattr(
+        "custom_components.email_ha._search_structured", AsyncMock(return_value=emails)
+    )
+    handler, schema = hass.services.registered[(DOMAIN, SERVICE_FIND_EMAILS)]
+
+    response = await handler(SimpleNamespace(data=schema({"max_results": 2})))
+
+    assert response["count"] == 2
+    assert response["returned_count"] == 2
+    assert response["truncated"] is True
+    assert response["limit_reached"] is True
 
 
 @pytest.mark.asyncio
@@ -191,6 +220,9 @@ async def test_advanced_search_propagates_raw_query(monkeypatch) -> None:
 
     assert search.await_args.kwargs["criteria"] == "UNSEEN UID 4:*"
     assert response["search_criteria"] == "UNSEEN UID 4:*"
+    assert response["has_matches"] is False
+    assert response["returned_count"] == 0
+    assert response["body_included"] is False
 
 
 @pytest.mark.asyncio
@@ -220,6 +252,8 @@ async def test_get_email_contents_uses_selected_folder_uid_and_limit(
     client.get_email_contents.assert_awaited_once_with(
         "Receipts", "7", body_max_chars=456
     )
+    assert response["uid"] == "7"
+    assert response["body_included"] is True
     assert response["message"]["plain_text_body"] == "Body"
 
 
