@@ -35,6 +35,7 @@ def _message(uid: str) -> dict:
 
 @pytest.mark.asyncio
 async def test_restored_baseline_without_opt_in_does_not_replay() -> None:
+    """A restored live-only watch advances its baseline without replaying mail."""
     coordinator = _coordinator()
     coordinator._folder_uid_state["Receipts"] = (9, 100)  # noqa: SLF001
     coordinator._restored_folders.add("Receipts")  # noqa: SLF001
@@ -55,6 +56,7 @@ async def test_restored_baseline_without_opt_in_does_not_replay() -> None:
 
 @pytest.mark.asyncio
 async def test_opted_in_restored_baseline_fetches_bounded_missed_mail() -> None:
+    """An opted-in restored watch fetches missed mail with the catch-up limit."""
     coordinator = _coordinator()
     coordinator._folder_uid_state["Receipts"] = (9, 100)  # noqa: SLF001
     coordinator._restored_folders.add("Receipts")  # noqa: SLF001
@@ -77,6 +79,7 @@ async def test_opted_in_restored_baseline_fetches_bounded_missed_mail() -> None:
 
 @pytest.mark.asyncio
 async def test_uidvalidity_change_never_catches_up_uncertain_history() -> None:
+    """A UIDVALIDITY change re-baselines instead of replaying uncertain history."""
     coordinator = _coordinator()
     coordinator._folder_uid_state["Receipts"] = (9, 100)  # noqa: SLF001
     coordinator._restored_folders.add("Receipts")  # noqa: SLF001
@@ -97,6 +100,7 @@ async def test_uidvalidity_change_never_catches_up_uncertain_history() -> None:
 
 @pytest.mark.asyncio
 async def test_restart_batch_matches_only_opted_in_watch() -> None:
+    """A restart catch-up batch matches only watches that opted into catch-up."""
     coordinator = _coordinator()
     coordinator.email_watches = [
         {
@@ -135,6 +139,7 @@ async def test_restart_batch_matches_only_opted_in_watch() -> None:
 
 
 def test_caught_up_event_is_marked_and_remains_body_free() -> None:
+    """Catch-up events are marked while retaining the body-free event contract."""
     coordinator = _coordinator()
     coordinator.email_watches = [
         {"id": "watch", "name": "Watch", "folder": "INBOX", "enabled": True}
@@ -154,6 +159,7 @@ def test_caught_up_event_is_marked_and_remains_body_free() -> None:
 
 @pytest.mark.asyncio
 async def test_disabled_catch_up_watch_still_does_no_matching_work() -> None:
+    """A disabled catch-up watch performs no matching queries."""
     coordinator = _coordinator()
     coordinator.email_watches = [
         {
