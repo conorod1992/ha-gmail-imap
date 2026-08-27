@@ -296,7 +296,9 @@ def parse_email_bytes(
         "preview": re.sub(r"\s+", " ", body)[:PREVIEW_CHARS],
         "attachment_metadata_available": attachment_metadata_available,
         "attachment_metadata_unavailable_reason": attachment_metadata_unavailable_reason,
-        "has_attachments": bool(attachment_count) if attachment_count is not None else None,
+        "has_attachments": bool(attachment_count)
+        if attachment_count is not None
+        else None,
         "attachment_count": attachment_count,
         "attachments_truncated": attachments_truncated,
         "attachments": attachments,
