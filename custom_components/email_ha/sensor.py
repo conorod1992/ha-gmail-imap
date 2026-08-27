@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import logging
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -35,8 +34,6 @@ from .gmail import (
     GmailEntityDefinition,
     enabled_entities_for_entry,
 )
-
-_LOGGER = logging.getLogger(__name__)
 
 
 def _rule_health_attributes(health: RuleHealthData) -> dict[str, str | None]:
@@ -98,14 +95,7 @@ class _BaseEmailSensor(CoordinatorEntity[EmailDataUpdateCoordinator], SensorEnti
         elapsed = (
             datetime.now(timezone.utc) - self.coordinator.last_success_time
         ).total_seconds()
-        if elapsed > UNAVAILABLE_AFTER_SECONDS:
-            _LOGGER.warning(
-                "%s unavailable: no successful update for %.0f seconds",
-                self.entity_id,
-                elapsed,
-            )
-            return False
-        return True
+        return elapsed <= UNAVAILABLE_AFTER_SECONDS
 
     @property
     def _email_data(self) -> EmailData | None:
