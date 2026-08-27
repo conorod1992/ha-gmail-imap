@@ -135,19 +135,38 @@ find_emails:
           example: pdf
           selector:
             text: {}
+        relative_date:
+          name: Relative date
+          description: Choose a rolling date window. Do not combine this with Since, Before, or On.
+          default: any
+          selector:
+            select:
+              options:
+                - label: Any time
+                  value: any
+                - label: Today
+                  value: today
+                - label: Yesterday
+                  value: yesterday
+                - label: Last 24 hours
+                  value: last_24_hours
+                - label: Last 7 days
+                  value: last_7_days
+                - label: Last 30 days
+                  value: last_30_days
         since:
           name: Since
-          description: Match emails on or after this date.
+          description: Match emails on or after this date. Do not combine with Relative date.
           selector:
             date: {}
         before:
           name: Before
-          description: Match emails before this date.
+          description: Match emails before this date. Do not combine with Relative date.
           selector:
             date: {}
         "on":
           name: "On"
-          description: Match emails on this date.
+          description: Match emails on this date. Do not combine with Relative date.
           selector:
             date: {}
     result_options:
