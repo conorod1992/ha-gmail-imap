@@ -107,12 +107,14 @@ class EmailWatchEventEntity(EventEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Expose watch state and privacy-safe rule health."""
+        """Expose watch state, persisted match time, and privacy-safe rule health."""
         health = self._coordinator.rule_health(self._watch_id)
+        last_matches = getattr(self._coordinator, "_watch_last_new_match", {})
         return {
             "folder": self._watch.get(CONF_FOLDER, DEFAULT_FOLDER),
             "enabled": bool(self._watch.get("enabled", True)),
             "catch_up": bool(self._watch.get(CONF_CATCH_UP, False)),
+            "last_new_match": last_matches.get(self._watch_id),
             "rule_status": health.status,
             "last_successful_check": health.last_successful_check,
             "last_error_at": health.last_error_at,
@@ -122,7 +124,7 @@ class EmailWatchEventEntity(EventEntity):
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        """Refresh health attributes even when no email match fires."""
+        """Refresh health and persisted match attributes on coordinator updates."""
         self.async_write_ha_state()
 
     @callback
