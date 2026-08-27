@@ -9,7 +9,9 @@ from datetime import date
 import pytest
 
 from custom_components.email_ha import FIND_EMAILS_SCHEMA
-from custom_components.email_ha.config_flow import _custom_common_schema
+from custom_components.email_ha.config_flow import (  # pyright: ignore[reportPrivateUsage]
+    _custom_common_schema,
+)
 from custom_components.email_ha.search import (
     build_structured_search_tokens,
     normalize_structured_filters,
