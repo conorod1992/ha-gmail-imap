@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import cast
 
 import pytest
 
@@ -78,7 +79,8 @@ def test_match_any_is_visible_in_summary() -> None:
 
 
 def test_find_emails_schema_accepts_match_any() -> None:
-    assert FIND_EMAILS_SCHEMA({"match_mode": "any"})["match_mode"] == "any"
+    validated = cast(dict[str, object], FIND_EMAILS_SCHEMA({"match_mode": "any"}))
+    assert validated["match_mode"] == "any"
 
 
 def test_options_common_form_exposes_match_mode() -> None:
