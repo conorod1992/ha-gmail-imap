@@ -100,7 +100,9 @@ async def test_find_emails_translates_filters_and_defaults_to_no_body(
 
 
 @pytest.mark.asyncio
-async def test_find_emails_exposes_latest_match_without_extra_search(monkeypatch) -> None:
+async def test_find_emails_exposes_latest_match_without_extra_search(
+    monkeypatch,
+) -> None:
     """Automations can access the newest match directly from the bounded result."""
     hass = _configured_hass()
     emails = [{"uid": "9", "subject": "Newest"}, {"uid": "8", "subject": "Older"}]
