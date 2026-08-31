@@ -15,7 +15,7 @@ import aioimaplib
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, OAuth2TokenRequestError
 from homeassistant.helpers.config_entry_oauth2_flow import OAuth2Session
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -285,26 +285,8 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         return remove_listener
 
     async def _async_ensure_fresh_token(self) -> str:
-        """Proactively refresh OAuth and return an access token."""
-        try:
-            token: dict[str, Any] = self.oauth_session.token
-            expires_in = token.get("expires_at", 0) - time.time()
-            if expires_in < 600 and self.config_entry is not None:
-                self.hass.config_entries.async_update_entry(
-                    self.config_entry,
-                    data={
-                        **self.config_entry.data,
-                        "token": {**token, "expires_at": time.time() - 1},
-                    },
-                )
-            await self.oauth_session.async_ensure_token_valid()
-        except Exception as err:
-            _LOGGER.warning(
-                "Token refresh failed for %s: %s", self._email, type(err).__name__
-            )
-            raise ConfigEntryAuthFailed(
-                f"Token refresh failed for {self._email}: {type(err).__name__}"
-            ) from err
+        """Refresh OAuth when needed and return the current access token."""
+        await self.oauth_session.async_ensure_token_valid()
         raw = self.oauth_session.token["access_token"]
         return raw.decode() if isinstance(raw, bytes) else str(raw)
 
@@ -745,7 +727,12 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             raise
         except asyncio.CancelledError:
             raise
-        except (OSError, aioimaplib.AioImapException, ImapClientError) as err:
+        except (
+            OSError,
+            aioimaplib.AioImapException,
+            ImapClientError,
+            OAuth2TokenRequestError,
+        ) as err:
             delay = IDLE_RECONNECT_DELAYS[
                 min(reconnect_attempt, len(IDLE_RECONNECT_DELAYS) - 1)
             ]
