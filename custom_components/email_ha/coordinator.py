@@ -15,7 +15,7 @@ import aioimaplib
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryAuthFailed, OAuth2TokenRequestError
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.config_entry_oauth2_flow import OAuth2Session
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -731,7 +731,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             OSError,
             aioimaplib.AioImapException,
             ImapClientError,
-            OAuth2TokenRequestError,
+            ConfigEntryNotReady,
         ) as err:
             delay = IDLE_RECONNECT_DELAYS[
                 min(reconnect_attempt, len(IDLE_RECONNECT_DELAYS) - 1)
