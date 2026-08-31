@@ -5,19 +5,18 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
-from aiohttp import RequestInfo
+from aiohttp import ClientResponseError, RequestInfo
 from multidict import CIMultiDict, CIMultiDictProxy
 import pytest
 from yarl import URL
 
 from custom_components.email_ha import _connect_for_call, _options_update_listener
-from custom_components.email_ha.const import DOMAIN
 from custom_components.email_ha.coordinator import EmailDataUpdateCoordinator
 from custom_components.email_ha.oauth import EmailHAOAuth2Session
 from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
     HomeAssistantError,
-    OAuth2TokenRequestReauthError,
-    OAuth2TokenRequestTransientError,
 )
 
 
@@ -27,16 +26,8 @@ def _request_info() -> RequestInfo:
     return RequestInfo(url, "POST", headers, url)
 
 
-def _transient_error() -> OAuth2TokenRequestTransientError:
-    return OAuth2TokenRequestTransientError(
-        request_info=_request_info(), status=503, domain=DOMAIN
-    )
-
-
-def _reauth_error() -> OAuth2TokenRequestReauthError:
-    return OAuth2TokenRequestReauthError(
-        request_info=_request_info(), status=401, domain=DOMAIN
-    )
+def _oauth_http_error(status: int) -> ClientResponseError:
+    return ClientResponseError(_request_info(), (), status=status)
 
 
 def _oauth_session(refresh_side_effect=None, *, refresh_result=None):
@@ -53,6 +44,7 @@ def _oauth_session(refresh_side_effect=None, *, refresh_result=None):
                 "expires_at": 0,
             }
         },
+        async_start_reauth=Mock(),
         async_start_reauth_if_available=Mock(),
     )
     implementation = SimpleNamespace(
@@ -79,6 +71,7 @@ async def test_successful_token_refresh_does_not_reload_entry() -> None:
     implementation.async_refresh_token.assert_awaited_once()
     hass.config_entries.async_update_entry.assert_called_once()
     hass.config_entries.async_reload.assert_not_awaited()
+    entry.async_start_reauth.assert_not_called()
     entry.async_start_reauth_if_available.assert_not_called()
 
 
@@ -100,29 +93,38 @@ async def test_options_listener_ignores_data_only_updates() -> None:
 
 
 @pytest.mark.asyncio
-async def test_transient_refresh_failure_does_not_start_reauth() -> None:
-    """Temporary Google OAuth failures stay retryable instead of becoming auth failures."""
+@pytest.mark.parametrize("status", [429, 503])
+async def test_legacy_transient_refresh_failure_does_not_start_reauth(
+    monkeypatch, status: int
+) -> None:
+    """Older HA releases map temporary OAuth failures onto retry semantics."""
+    monkeypatch.setattr(
+        "custom_components.email_ha.oauth._HAS_NATIVE_OAUTH_ERROR_SEMANTICS", False
+    )
     session, _hass, entry, _implementation = _oauth_session(
-        refresh_side_effect=_transient_error()
+        refresh_side_effect=_oauth_http_error(status)
     )
 
-    with pytest.raises(OAuth2TokenRequestTransientError):
+    with pytest.raises(ConfigEntryNotReady):
         await session.async_ensure_token_valid()
 
-    entry.async_start_reauth_if_available.assert_not_called()
+    entry.async_start_reauth.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_reauth_refresh_failure_starts_reauth() -> None:
-    """A non-recoverable refresh rejection still starts Home Assistant reauth."""
+async def test_legacy_reauth_refresh_failure_starts_reauth(monkeypatch) -> None:
+    """Older HA releases map rejected refresh tokens onto reauthentication."""
+    monkeypatch.setattr(
+        "custom_components.email_ha.oauth._HAS_NATIVE_OAUTH_ERROR_SEMANTICS", False
+    )
     session, hass, entry, _implementation = _oauth_session(
-        refresh_side_effect=_reauth_error()
+        refresh_side_effect=_oauth_http_error(401)
     )
 
-    with pytest.raises(OAuth2TokenRequestReauthError):
+    with pytest.raises(ConfigEntryAuthFailed):
         await session.async_ensure_token_valid()
 
-    entry.async_start_reauth_if_available.assert_called_once_with(hass)
+    entry.async_start_reauth.assert_called_once_with(hass)
 
 
 @pytest.mark.asyncio
@@ -130,11 +132,13 @@ async def test_coordinator_preserves_transient_oauth_exception() -> None:
     """Coordinator refresh must not convert a temporary OAuth failure to auth failed."""
     coordinator = object.__new__(EmailDataUpdateCoordinator)
     coordinator.oauth_session = SimpleNamespace(
-        async_ensure_token_valid=AsyncMock(side_effect=_transient_error()),
+        async_ensure_token_valid=AsyncMock(
+            side_effect=ConfigEntryNotReady("temporary OAuth failure")
+        ),
         token={"access_token": "unused"},
     )
 
-    with pytest.raises(OAuth2TokenRequestTransientError):
+    with pytest.raises(ConfigEntryNotReady):
         await coordinator._async_ensure_fresh_token()  # noqa: SLF001
 
 
@@ -144,7 +148,7 @@ async def test_idle_retries_transient_oauth_failure(monkeypatch) -> None:
     coordinator = object.__new__(EmailDataUpdateCoordinator)
     coordinator._email = "user@example.com"  # noqa: SLF001
     coordinator._async_run_idle_session = AsyncMock(  # type: ignore[method-assign]  # noqa: SLF001
-        side_effect=_transient_error()
+        side_effect=ConfigEntryNotReady("temporary OAuth failure")
     )
     sleep = AsyncMock()
     monkeypatch.setattr("custom_components.email_ha.coordinator.asyncio.sleep", sleep)
@@ -160,7 +164,9 @@ async def test_action_reports_transient_oauth_failure_as_retryable() -> None:
     """Explicit actions no longer tell users to reauthenticate for a temporary outage."""
     coordinator = SimpleNamespace(
         oauth_session=SimpleNamespace(
-            async_ensure_token_valid=AsyncMock(side_effect=_transient_error())
+            async_ensure_token_valid=AsyncMock(
+                side_effect=ConfigEntryNotReady("temporary OAuth failure")
+            )
         )
     )
 
@@ -173,7 +179,9 @@ async def test_action_reports_real_reauth_failure_as_reauth() -> None:
     """Explicit actions retain clear guidance when Google rejects the refresh token."""
     coordinator = SimpleNamespace(
         oauth_session=SimpleNamespace(
-            async_ensure_token_valid=AsyncMock(side_effect=_reauth_error())
+            async_ensure_token_valid=AsyncMock(
+                side_effect=ConfigEntryAuthFailed("refresh token rejected")
+            )
         )
     )
 
