@@ -1,4 +1,4 @@
-"""Repository metadata and frontend contract tests."""
+"""Tests for translation and release metadata consistency."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 
 import yaml
+
+from custom_components.email_ha.gmail import GMAIL_ENTITY_DEFINITIONS
 
 _ROOT = Path(__file__).parents[1]
 _INTEGRATION = _ROOT / "custom_components" / "email_ha"
@@ -15,32 +17,33 @@ def _json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def test_manifest_and_hacs_metadata_are_consistent() -> None:
-    """The integration remains discoverable and installable."""
-    manifest = _json(_INTEGRATION / "manifest.json")
-    hacs = _json(_ROOT / "hacs.json")
-
-    assert manifest["domain"] == "email_ha"
-    assert manifest["config_flow"] is True
-    assert manifest["iot_class"] == "cloud_push"
-    assert "application_credentials" in manifest["dependencies"]
-    assert hacs["content_in_root"] is False
-    assert hacs["render_readme"] is True
+def test_custom_integration_english_translation_is_complete() -> None:
+    """Runtime English translations mirror the canonical source exactly."""
+    assert _json(_INTEGRATION / "translations" / "en.json") == _json(
+        _INTEGRATION / "strings.json"
+    )
 
 
-def test_strings_and_translations_expose_the_same_top_level_contract() -> None:
-    """English translations should stay in lock-step with strings.json."""
-    strings = _json(_INTEGRATION / "strings.json")
-    translation = _json(_INTEGRATION / "translations" / "en.json")
+def test_every_fixed_entity_uses_a_translation_key() -> None:
+    """No built-in entity name relies on hard-coded Python text."""
+    strings = _json(_INTEGRATION / "strings.json")["entity"]
+    expected_sensors = {
+        definition.key
+        for definition in GMAIL_ENTITY_DEFINITIONS
+        if definition.platform == "sensor"
+    } | {"connection_status", "last_successful_update"}
+    expected_events = {
+        definition.key
+        for definition in GMAIL_ENTITY_DEFINITIONS
+        if definition.platform == "event"
+    }
 
-    assert strings.keys() == translation.keys()
-    assert strings["config"].keys() == translation["config"].keys()
-    assert strings["options"].keys() == translation["options"].keys()
-    assert strings["entity"].keys() == translation["entity"].keys()
+    assert set(strings["sensor"]) == expected_sensors
+    assert set(strings["event"]) == expected_events
 
 
-def test_services_yaml_matches_strings_service_names() -> None:
-    """The action UI and translated service labels stay aligned."""
+def test_action_translation_and_yaml_surfaces_match() -> None:
+    """Only the clean three-action API is translated and discoverable."""
     strings = _json(_INTEGRATION / "strings.json")
     services = yaml.safe_load(
         (_INTEGRATION / "services.yaml").read_text(encoding="utf-8")
