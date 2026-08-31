@@ -98,6 +98,9 @@ You will do three things:
 
 You do **not** need to pay for Google Cloud, and you do **not** need to enable the Gmail REST API.
 
+> [!IMPORTANT]
+> Google's **Testing** publishing status is suitable for getting Email HA connected, but refresh tokens issued to testing apps expire after **7 days**. For normal ongoing use, move the OAuth app to **In production** after you have confirmed setup works, then reauthenticate Email HA once so Google issues a token under the production publishing status. Personal-use apps with only you or a small number of people you know can remain unverified, although Google may still show an unverified-app warning.
+
 ## 1. Create or choose a Google Cloud project
 
 Open the [Google Cloud Console](https://console.cloud.google.com/) and create a new project, or choose an existing project you are happy to use for Email HA.
@@ -111,6 +114,10 @@ If Google asks you to configure the app first:
 1. Give the app a name, for example **Email HA**.
 2. For a personal Gmail account, choose an **External** audience.
 3. Add the Gmail account you intend to connect under **Test users** while the app remains in testing.
+
+Testing is useful while you confirm the setup. Once Email HA is working, change the app's publishing status to **In production** to avoid Google's 7-day testing refresh-token lifetime. If you already connected Email HA while the app was in Testing, reauthenticate the integration once after publishing it.
+
+Google documents personal-use apps as an exception to OAuth verification requirements when the app is used only by you or by a small number of people you know personally. Such an app can still show Google's unverified-app warning.
 
 ## 3. Add the Gmail mailbox permission
 
@@ -916,6 +923,16 @@ Check:
 ## Google says the app is unverified or blocked
 
 For a personal OAuth project that is still in testing, make sure the Gmail account you are signing in with is listed under **Test users**.
+
+For personal-use apps used only by you or by a small number of people you know, Google documents an exception from submitting the app for verification. An unverified-app warning can still be shown.
+
+## Email HA asks me to sign in again after about a week
+
+Check the Google Auth Platform **Publishing status** for the OAuth project.
+
+If it is still **Testing**, Google expires its refresh tokens after 7 days. Move the app to **In production**, then reauthenticate Email HA once so the integration receives a new refresh token under the production publishing status.
+
+Refresh tokens can still be revoked or expire for other reasons, so a later reauthentication request is not automatically evidence of the 7-day testing limit.
 
 ## Home Assistant reports an OAuth callback problem
 
