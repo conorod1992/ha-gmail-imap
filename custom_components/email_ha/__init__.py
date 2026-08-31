@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 import logging
 from typing import Any
 
@@ -15,8 +15,6 @@ from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
     HomeAssistantError,
-    OAuth2TokenRequestError,
-    OAuth2TokenRequestReauthError,
     ServiceValidationError,
 )
 from homeassistant.helpers import config_validation as cv
@@ -200,7 +198,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 def _options_update_listener(
     initial_options: dict[str, Any],
-) -> Callable[[HomeAssistant, ConfigEntry], Any]:
+) -> Callable[[HomeAssistant, ConfigEntry], Awaitable[None]]:
     """Reload only when user-managed options change, not when OAuth tokens rotate."""
     previous_options = dict(initial_options)
 
@@ -259,11 +257,11 @@ async def _connect_for_call(coordinator: EmailDataUpdateCoordinator) -> ImapClie
             _entry_for_coordinator(coordinator).data[CONF_EMAIL],
             str(access_token),
         )
-    except OAuth2TokenRequestReauthError as err:
+    except ConfigEntryAuthFailed as err:
         raise HomeAssistantError(
             "Gmail authorization expired or was revoked; reauthenticate the integration"
         ) from err
-    except OAuth2TokenRequestError as err:
+    except ConfigEntryNotReady as err:
         raise HomeAssistantError(
             "Unable to refresh Gmail authorization; try again later"
         ) from err
