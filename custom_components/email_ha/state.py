@@ -14,6 +14,7 @@ _STORAGE_VERSION = 1
 _SAVE_DELAY = 5
 _MAX_FOLDERS = 100
 _MAX_MATCH_ENTRIES = 100
+_MAX_WATCH_UID_ENTRIES = 100
 
 
 class EmailStateStore:
@@ -28,6 +29,8 @@ class EmailStateStore:
             atomic_writes=True,
         )
         self.folder_uid_state: dict[str, tuple[int | None, int]] = {}
+        self.watch_uid_state: dict[str, tuple[str, int | None, int]] = {}
+        self.has_watch_uid_state = False
         self.custom_last_new_match: dict[str, str] = {}
         self.watch_last_new_match: dict[str, str] = {}
 
@@ -49,6 +52,29 @@ class EmailStateStore:
                 if not isinstance(last_seen_uid, int) or last_seen_uid < 0:
                     continue
                 self.folder_uid_state[folder] = (uid_validity, last_seen_uid)
+
+        watch_uid_state = raw.get("watch_uid_state")
+        self.has_watch_uid_state = isinstance(watch_uid_state, Mapping)
+        if isinstance(watch_uid_state, Mapping):
+            for watch_id, value in list(watch_uid_state.items())[
+                :_MAX_WATCH_UID_ENTRIES
+            ]:
+                if not isinstance(watch_id, str) or not isinstance(value, Mapping):
+                    continue
+                fingerprint = value.get("fingerprint")
+                uid_validity = value.get("uidvalidity")
+                last_seen_uid = value.get("last_seen_uid")
+                if not isinstance(fingerprint, str) or not fingerprint:
+                    continue
+                if uid_validity is not None and not isinstance(uid_validity, int):
+                    continue
+                if not isinstance(last_seen_uid, int) or last_seen_uid < 0:
+                    continue
+                self.watch_uid_state[watch_id] = (
+                    fingerprint,
+                    uid_validity,
+                    last_seen_uid,
+                )
 
         self.custom_last_new_match = self._load_matches(
             raw.get("custom_last_new_match")
@@ -82,6 +108,18 @@ class EmailStateStore:
                     uid_validity,
                     last_seen_uid,
                 ) in self.folder_uid_state.items()
+            },
+            "watch_uid_state": {
+                watch_id: {
+                    "fingerprint": fingerprint,
+                    "uidvalidity": uid_validity,
+                    "last_seen_uid": last_seen_uid,
+                }
+                for watch_id, (
+                    fingerprint,
+                    uid_validity,
+                    last_seen_uid,
+                ) in self.watch_uid_state.items()
             },
             "custom_last_new_match": dict(self.custom_last_new_match),
             "watch_last_new_match": dict(self.watch_last_new_match),

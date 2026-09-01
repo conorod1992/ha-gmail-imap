@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from typing import Any, cast
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from custom_components.email_ha.const import MAX_CATCH_UP_EVENTS
-from custom_components.email_ha.coordinator import EmailDataUpdateCoordinator
+from custom_components.email_ha.coordinator import (
+    EmailDataUpdateCoordinator,
+    watch_definition_fingerprint,
+)
 
 
 def _coordinator() -> EmailDataUpdateCoordinator:
@@ -15,9 +20,11 @@ def _coordinator() -> EmailDataUpdateCoordinator:
     coordinator._email = "user@example.com"  # noqa: SLF001
     coordinator._folder_uid_state = {}  # noqa: SLF001
     coordinator._restored_folders = set()  # noqa: SLF001
+    coordinator._watch_uid_state = {}  # noqa: SLF001
     coordinator._custom_last_new_match = {}  # noqa: SLF001
     coordinator._watch_last_new_match = {}  # noqa: SLF001
     coordinator._watch_listeners = {}  # noqa: SLF001
+    coordinator._rule_health = {}  # noqa: SLF001
     coordinator.email_watches = []
     coordinator.custom_sensors = []
     return coordinator
@@ -134,6 +141,121 @@ async def test_restart_batch_matches_only_opted_in_watch() -> None:
     ]
     assert coordinator._custom_last_new_match == {}  # noqa: SLF001
     client.matching_uids.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_new_watch_does_not_inherit_existing_watch_catch_up_history() -> None:
+    """A new watch sharing a folder starts at current UID while an old watch catches up."""
+    coordinator = _coordinator()
+    established = {
+        "id": "established",
+        "name": "Established",
+        "folder": "Receipts",
+        "enabled": True,
+        "catch_up": True,
+        "filters": {"from": "example.com"},
+    }
+    new_watch = {
+        "id": "new",
+        "name": "New",
+        "folder": "Receipts",
+        "enabled": True,
+        "catch_up": True,
+        "filters": {"from": "example.com"},
+    }
+    coordinator.email_watches = [established, new_watch]
+    coordinator._watch_uid_state["established"] = (  # noqa: SLF001
+        watch_definition_fingerprint(established),
+        9,
+        100,
+    )
+
+    floors = coordinator._prepare_watch_uid_floors(  # noqa: SLF001
+        {"Receipts": {"uidvalidity": 9, "uidnext": 104}}
+    )
+
+    assert floors == {"established": 100, "new": 103}
+    client = AsyncMock()
+    client.matching_uids.return_value = {"101", "102", "103"}
+    matches = await coordinator._async_match_new_messages(  # noqa: SLF001
+        client,
+        {"Receipts": [_message("101"), _message("102"), _message("103")]},
+        {"Receipts"},
+        floors,
+    )
+
+    assert [(watch_id, message["uid"]) for watch_id, message in matches] == [
+        ("established", "101"),
+        ("established", "102"),
+        ("established", "103"),
+    ]
+    client.matching_uids.assert_awaited_once_with(
+        "Receipts",
+        ["101", "102", "103"],
+        ["FROM", '"example.com"'],
+    )
+
+
+def test_material_watch_edit_rebaselines_but_name_edit_keeps_floor() -> None:
+    """Only fields that change matching/catch-up semantics reset eligibility."""
+    coordinator = _coordinator()
+    watch = {
+        "id": "watch",
+        "name": "Original name",
+        "folder": "Receipts",
+        "catch_up": True,
+        "filters": {"from": "example.com"},
+    }
+    coordinator.email_watches = [watch]
+    coordinator._watch_uid_state["watch"] = (  # noqa: SLF001
+        watch_definition_fingerprint(watch),
+        9,
+        100,
+    )
+
+    watch["name"] = "Renamed only"
+    unchanged = coordinator._prepare_watch_uid_floors(  # noqa: SLF001
+        {"Receipts": {"uidvalidity": 9, "uidnext": 104}}
+    )
+    assert unchanged["watch"] == 100
+
+    watch["filters"] = {"subject": "receipt"}
+    changed = coordinator._prepare_watch_uid_floors(  # noqa: SLF001
+        {"Receipts": {"uidvalidity": 9, "uidnext": 105}}
+    )
+    assert changed["watch"] == 104
+
+
+@pytest.mark.asyncio
+async def test_legacy_state_migrates_existing_watch_from_folder_baseline() -> None:
+    """The first upgrade keeps established catch-up eligibility from old state."""
+    coordinator = _coordinator()
+    watch = {
+        "id": "watch",
+        "folder": "Receipts",
+        "catch_up": True,
+        "filters": {"from": "example.com"},
+    }
+    coordinator.email_watches = [watch]
+    state_store = SimpleNamespace(
+        async_load=AsyncMock(),
+        folder_uid_state={"Receipts": (9, 100)},
+        watch_uid_state={},
+        has_watch_uid_state=False,
+        custom_last_new_match={},
+        watch_last_new_match={},
+        async_schedule_save=Mock(),
+    )
+    cast(Any, coordinator)._state_store = state_store  # noqa: SLF001
+
+    await coordinator.async_load_state()
+
+    assert coordinator._watch_uid_state["watch"] == (  # noqa: SLF001
+        watch_definition_fingerprint(watch),
+        9,
+        100,
+    )
+    state_store.async_schedule_save.assert_called_once()
 
 
 def test_caught_up_event_is_marked_and_remains_body_free() -> None:

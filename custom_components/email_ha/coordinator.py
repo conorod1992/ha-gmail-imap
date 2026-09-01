@@ -7,6 +7,8 @@ from collections.abc import Callable
 import contextlib
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+import hashlib
+import json
 import logging
 import time
 from typing import Any
@@ -40,6 +42,23 @@ _LOGGER = logging.getLogger(__name__)
 
 _FOLDER_REFRESH_INTERVAL = 86400
 _CATCH_UP_MARKER = "_email_ha_caught_up"
+
+
+def watch_definition_fingerprint(definition: dict[str, Any]) -> str:
+    """Return a privacy-safe fingerprint of fields that change watch eligibility."""
+    material = {
+        "folder": str(definition.get("folder", DEFAULT_FOLDER)),
+        "filters": definition.get("filters", {}),
+        CONF_CATCH_UP: bool(definition.get(CONF_CATCH_UP, False)),
+    }
+    encoded = json.dumps(
+        material,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        default=str,
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 @dataclass(slots=True)
@@ -122,6 +141,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         self._watch_listeners: dict[str, set[Callable[[dict[str, Any]], None]]] = {}
         self._folder_uid_state: dict[str, tuple[int | None, int]] = {}
         self._restored_folders: set[str] = set()
+        self._watch_uid_state: dict[str, tuple[str, int | None, int]] = {}
         self._custom_last_new_match: dict[str, str] = {}
         self._watch_last_new_match: dict[str, str] = {}
         self._rule_health: dict[str, RuleHealthData] = {}
@@ -150,6 +170,29 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         self._restored_folders = set(self._folder_uid_state)
         custom_ids = {str(item.get("id", "")) for item in self.custom_sensors}
         watch_ids = {str(item.get("id", "")) for item in self.email_watches}
+        if self._state_store.has_watch_uid_state:
+            self._watch_uid_state = {
+                key: value
+                for key, value in self._state_store.watch_uid_state.items()
+                if key in watch_ids
+            }
+        else:
+            # One-time migration from the older folder-only state. Existing watches
+            # inherit the folder baseline so an upgrade does not discard a legitimate
+            # restart catch-up window. New watches created after this state is saved
+            # have no per-watch entry and therefore baseline at the current UID.
+            self._watch_uid_state = {}
+            for watch in self.email_watches:
+                watch_id = str(watch.get("id", ""))
+                folder = str(watch.get("folder", DEFAULT_FOLDER))
+                folder_state = self._folder_uid_state.get(folder)
+                if watch_id and folder_state is not None:
+                    self._watch_uid_state[watch_id] = (
+                        watch_definition_fingerprint(watch),
+                        folder_state[0],
+                        folder_state[1],
+                    )
+            self._schedule_state_save()
         self._custom_last_new_match = {
             key: value
             for key, value in self._state_store.custom_last_new_match.items()
@@ -168,6 +211,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         if state_store is None:
             return
         state_store.folder_uid_state = dict(self._folder_uid_state)
+        state_store.watch_uid_state = dict(getattr(self, "_watch_uid_state", {}))
         state_store.custom_last_new_match = dict(self._custom_last_new_match)
         state_store.watch_last_new_match = dict(
             getattr(self, "_watch_last_new_match", {})
@@ -376,6 +420,45 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             )
         return messages
 
+    def _prepare_watch_uid_floors(
+        self, folder_statuses: dict[str, dict[str, int]]
+    ) -> dict[str, int]:
+        """Return prior per-watch floors and advance each watch to current UID state."""
+        floors: dict[str, int] = {}
+        current_watch_ids: set[str] = set()
+        state = getattr(self, "_watch_uid_state", {})
+        for watch in self.email_watches:
+            watch_id = str(watch.get("id", ""))
+            if not watch_id:
+                continue
+            current_watch_ids.add(watch_id)
+            folder = str(watch.get("folder", DEFAULT_FOLDER))
+            status = folder_statuses.get(folder)
+            if status is None:
+                continue
+            uid_validity = status.get("uidvalidity")
+            highest_uid = max(0, status.get("uidnext", 1) - 1)
+            fingerprint = watch_definition_fingerprint(watch)
+            previous = state.get(watch_id)
+            if (
+                previous is not None
+                and previous[0] == fingerprint
+                and previous[1] == uid_validity
+            ):
+                floors[watch_id] = previous[2]
+                highest_uid = max(highest_uid, previous[2])
+            else:
+                # A new/materially changed watch must never inherit older arrivals
+                # fetched for another watch sharing the same folder.
+                floors[watch_id] = highest_uid
+            state[watch_id] = (fingerprint, uid_validity, highest_uid)
+        self._watch_uid_state = {
+            watch_id: value
+            for watch_id, value in state.items()
+            if watch_id in current_watch_ids
+        }
+        return floors
+
     @staticmethod
     def _count_data(
         count: int,
@@ -400,8 +483,9 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         client: ImapClient,
         arrivals: dict[str, list[dict[str, Any]]],
         catch_up_only_folders: set[str] | None = None,
+        watch_uid_floors: dict[str, int] | None = None,
     ) -> list[tuple[str, dict[str, Any]]]:
-        """Match bounded arrivals, restricting restart batches to opted-in watches."""
+        """Match bounded arrivals, restricting restart batches to eligible watches."""
         catch_up_only_folders = catch_up_only_folders or set()
         watch_matches: list[tuple[str, dict[str, Any]]] = []
         observed_at = datetime.now(timezone.utc).isoformat()
@@ -418,18 +502,32 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             caught_up = folder in catch_up_only_folders
             if caught_up and (not is_watch or not definition.get(CONF_CATCH_UP, False)):
                 continue
-            if not definition_id or not arrivals.get(folder):
+            candidate_messages = arrivals.get(folder, [])
+            if is_watch and watch_uid_floors is not None:
+                floor = watch_uid_floors.get(definition_id)
+                if floor is None:
+                    continue
+                eligible_messages: list[dict[str, Any]] = []
+                for message in candidate_messages:
+                    try:
+                        uid = int(str(message.get("uid", "")))
+                    except (TypeError, ValueError):
+                        continue
+                    if uid > floor:
+                        eligible_messages.append(message)
+                candidate_messages = eligible_messages
+            if not definition_id or not candidate_messages:
                 continue
             try:
                 tokens = build_structured_search_tokens(definition.get("filters", {}))
                 matching_uids = await client.matching_uids(
                     folder,
-                    [str(message.get("uid", "")) for message in arrivals[folder]],
+                    [str(message.get("uid", "")) for message in candidate_messages],
                     tokens,
                 )
                 if is_watch:
                     self._set_rule_success(definition_id, checked_at=observed_at)
-                for message in arrivals[folder]:
+                for message in candidate_messages:
                     if str(message.get("uid", "")) not in matching_uids:
                         continue
                     if is_watch:
@@ -541,6 +639,8 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             ):
                 folder_statuses[folder] = status
 
+        watch_uid_floors = self._prepare_watch_uid_floors(folder_statuses)
+
         checked_at = datetime.now(timezone.utc).isoformat()
         for watch in self.email_watches:
             watch_id = str(watch.get("id", ""))
@@ -580,7 +680,10 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                 catch_up_only_folders.add(folder)
 
         watch_matches = await self._async_match_new_messages(
-            client, arrivals, catch_up_only_folders
+            client,
+            arrivals,
+            catch_up_only_folders,
+            watch_uid_floors,
         )
 
         custom_counts: dict[str, SearchCountData] = {}
