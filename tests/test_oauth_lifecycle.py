@@ -58,7 +58,12 @@ def _oauth_session(refresh_side_effect=None, *, refresh_result=None):
             },
         )
     )
-    return EmailHAOAuth2Session(hass, entry, implementation), hass, entry, implementation
+    return (
+        EmailHAOAuth2Session(hass, entry, implementation),
+        hass,
+        entry,
+        implementation,
+    )
 
 
 @pytest.mark.asyncio
@@ -78,9 +83,7 @@ async def test_successful_token_refresh_does_not_reload_entry() -> None:
 @pytest.mark.asyncio
 async def test_options_listener_ignores_data_only_updates() -> None:
     """The config-entry listener reacts only to user-managed options changes."""
-    hass = SimpleNamespace(
-        config_entries=SimpleNamespace(async_reload=AsyncMock())
-    )
+    hass = SimpleNamespace(config_entries=SimpleNamespace(async_reload=AsyncMock()))
     entry = SimpleNamespace(entry_id="entry-1", options={"folder": "INBOX"})
     listener = _options_update_listener(dict(entry.options))
 
