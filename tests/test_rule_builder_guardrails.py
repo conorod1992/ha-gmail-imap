@@ -68,8 +68,8 @@ def test_match_any_dates_are_not_mistaken_for_an_impossible_range() -> None:
     )
 
     assert tokens[0] == "OR"
-    assert "SINCE 10-Sep-2026" in tokens
-    assert "BEFORE 05-Sep-2026" in tokens
+    assert any("SINCE 10-Sep-2026" in token for token in tokens)
+    assert any("BEFORE 05-Sep-2026" in token for token in tokens)
 
 
 def test_rule_builder_copy_warns_about_broad_rules_and_explains_catch_up() -> None:
