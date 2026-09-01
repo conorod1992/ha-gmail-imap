@@ -36,6 +36,15 @@ class EmailStateStore:
 
     async def async_load(self) -> None:
         """Load validated lightweight state, ignoring malformed entries."""
+        # A Store instance normally loads once, but resetting first makes repeated
+        # loads deterministic and prevents removed/corrupt entries from lingering in
+        # memory if Home Assistant ever retries state restoration on this coordinator.
+        self.folder_uid_state = {}
+        self.watch_uid_state = {}
+        self.has_watch_uid_state = False
+        self.custom_last_new_match = {}
+        self.watch_last_new_match = {}
+
         raw = await self._store.async_load()
         if not isinstance(raw, Mapping):
             return
