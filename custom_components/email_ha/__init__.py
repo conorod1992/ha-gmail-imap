@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Coroutine
 import logging
 from typing import Any
 
@@ -198,7 +198,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 def _options_update_listener(
     initial_options: dict[str, Any],
-) -> Callable[[HomeAssistant, ConfigEntry], Awaitable[None]]:
+) -> Callable[[HomeAssistant, ConfigEntry], Coroutine[Any, Any, None]]:
     """Reload only when user-managed options change, not when OAuth tokens rotate."""
     previous_options = dict(initial_options)
 
