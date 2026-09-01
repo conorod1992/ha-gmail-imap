@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -236,7 +237,7 @@ async def test_legacy_state_migrates_existing_watch_from_folder_baseline() -> No
         "filters": {"from": "example.com"},
     }
     coordinator.email_watches = [watch]
-    coordinator._state_store = SimpleNamespace(  # noqa: SLF001
+    state_store = SimpleNamespace(
         async_load=AsyncMock(),
         folder_uid_state={"Receipts": (9, 100)},
         watch_uid_state={},
@@ -245,6 +246,7 @@ async def test_legacy_state_migrates_existing_watch_from_folder_baseline() -> No
         watch_last_new_match={},
         async_schedule_save=Mock(),
     )
+    cast(Any, coordinator)._state_store = state_store  # noqa: SLF001
 
     await coordinator.async_load_state()
 
@@ -253,7 +255,7 @@ async def test_legacy_state_migrates_existing_watch_from_folder_baseline() -> No
         9,
         100,
     )
-    coordinator._state_store.async_schedule_save.assert_called_once()  # noqa: SLF001
+    state_store.async_schedule_save.assert_called_once()
 
 
 def test_caught_up_event_is_marked_and_remains_body_free() -> None:
