@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, Mock
 
 from aiohttp import ClientResponseError, RequestInfo
@@ -13,10 +14,16 @@ from yarl import URL
 from custom_components.email_ha import _connect_for_call, _options_update_listener
 from custom_components.email_ha.coordinator import EmailDataUpdateCoordinator
 from custom_components.email_ha.oauth import EmailHAOAuth2Session
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
     HomeAssistantError,
+)
+from homeassistant.helpers.config_entry_oauth2_flow import (
+    AbstractOAuth2Implementation,
+    OAuth2Session,
 )
 
 
@@ -59,7 +66,11 @@ def _oauth_session(refresh_side_effect=None, *, refresh_result=None):
         )
     )
     return (
-        EmailHAOAuth2Session(hass, entry, implementation),
+        EmailHAOAuth2Session(
+            cast(HomeAssistant, hass),
+            cast(ConfigEntry, entry),
+            cast(AbstractOAuth2Implementation, implementation),
+        ),
         hass,
         entry,
         implementation,
@@ -87,11 +98,11 @@ async def test_options_listener_ignores_data_only_updates() -> None:
     entry = SimpleNamespace(entry_id="entry-1", options={"folder": "INBOX"})
     listener = _options_update_listener(dict(entry.options))
 
-    await listener(hass, entry)
+    await listener(cast(HomeAssistant, hass), cast(ConfigEntry, entry))
     hass.config_entries.async_reload.assert_not_awaited()
 
     entry.options = {"folder": "Receipts"}
-    await listener(hass, entry)
+    await listener(cast(HomeAssistant, hass), cast(ConfigEntry, entry))
     hass.config_entries.async_reload.assert_awaited_once_with("entry-1")
 
 
@@ -134,11 +145,14 @@ async def test_legacy_reauth_refresh_failure_starts_reauth(monkeypatch) -> None:
 async def test_coordinator_preserves_transient_oauth_exception() -> None:
     """Coordinator refresh must not convert a temporary OAuth failure to auth failed."""
     coordinator = object.__new__(EmailDataUpdateCoordinator)
-    coordinator.oauth_session = SimpleNamespace(
-        async_ensure_token_valid=AsyncMock(
-            side_effect=ConfigEntryNotReady("temporary OAuth failure")
+    coordinator.oauth_session = cast(
+        OAuth2Session,
+        SimpleNamespace(
+            async_ensure_token_valid=AsyncMock(
+                side_effect=ConfigEntryNotReady("temporary OAuth failure")
+            ),
+            token={"access_token": "unused"},
         ),
-        token={"access_token": "unused"},
     )
 
     with pytest.raises(ConfigEntryNotReady):
@@ -174,7 +188,7 @@ async def test_action_reports_transient_oauth_failure_as_retryable() -> None:
     )
 
     with pytest.raises(HomeAssistantError, match="try again later"):
-        await _connect_for_call(coordinator)
+        await _connect_for_call(cast(EmailDataUpdateCoordinator, coordinator))
 
 
 @pytest.mark.asyncio
@@ -189,4 +203,4 @@ async def test_action_reports_real_reauth_failure_as_reauth() -> None:
     )
 
     with pytest.raises(HomeAssistantError, match="reauthenticate"):
-        await _connect_for_call(coordinator)
+        await _connect_for_call(cast(EmailDataUpdateCoordinator, coordinator))
