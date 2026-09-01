@@ -11,11 +11,10 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from homeassistant.exceptions import ConfigEntryAuthFailed
-
 from custom_components.email_ha.const import IDLE_RECONNECT_DELAYS
 from custom_components.email_ha.coordinator import EmailDataUpdateCoordinator
 from custom_components.email_ha.state import EmailStateStore
+from homeassistant.exceptions import ConfigEntryAuthFailed
 
 
 def _coordinator() -> EmailDataUpdateCoordinator:
@@ -182,7 +181,7 @@ async def test_unexpected_idle_error_uses_bounded_reconnect_backoff(
     """Unexpected runtime failures are logged and retried instead of killing IDLE."""
     coordinator = _coordinator()
     run_session = AsyncMock(side_effect=RuntimeError("boom"))
-    cast(Any, coordinator)._async_run_idle_session = run_session
+    cast(Any, coordinator)._async_run_idle_session = run_session  # noqa: SLF001
     sleep = AsyncMock()
     monkeypatch.setattr("custom_components.email_ha.coordinator.asyncio.sleep", sleep)
 
@@ -198,7 +197,7 @@ async def test_unexpected_idle_error_uses_bounded_reconnect_backoff(
 async def test_idle_auth_failure_remains_terminal() -> None:
     """Self-healing must not turn a genuine reauth requirement into a retry loop."""
     coordinator = _coordinator()
-    cast(Any, coordinator)._async_run_idle_session = AsyncMock(
+    cast(Any, coordinator)._async_run_idle_session = AsyncMock(  # noqa: SLF001
         side_effect=ConfigEntryAuthFailed("reauth")
     )
 
