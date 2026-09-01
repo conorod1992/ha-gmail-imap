@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-import contextlib
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -911,7 +910,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             )
             await asyncio.sleep(delay)
             return reconnect_attempt + 1
-        except Exception as err:  # noqa: BLE001 - keep the push loop self-healing
+        except Exception as err:
             delay = IDLE_RECONNECT_DELAYS[
                 min(reconnect_attempt, len(IDLE_RECONNECT_DELAYS) - 1)
             ]
