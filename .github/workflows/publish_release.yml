@@ -180,13 +180,20 @@ jobs:
             git push origin HEAD:main
           fi
 
-      - name: Create GitHub release
+      - name: Build HACS release archive
+        run: |
+          cd custom_components/email_ha
+          zip -r ../../email_ha.zip .
+          cd ../..
+          test -s email_ha.zip
+
+      - name: Create GitHub release with archive
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           RELEASE_SHA="$(git rev-parse HEAD)"
-          gh release create "$VERSION" \
+          gh release create "$VERSION" email_ha.zip \
             --target "$RELEASE_SHA" \
             --title "$VERSION" \
             --generate-notes
