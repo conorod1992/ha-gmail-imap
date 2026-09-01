@@ -96,9 +96,7 @@ async def test_state_store_repeated_load_does_not_keep_removed_values() -> None:
             async_load=AsyncMock(
                 side_effect=[
                     {
-                        "folders": {
-                            "INBOX": {"uidvalidity": 1, "last_seen_uid": 10}
-                        },
+                        "folders": {"INBOX": {"uidvalidity": 1, "last_seen_uid": 10}},
                         "watch_uid_state": {
                             "watch": {
                                 "fingerprint": "abc",
@@ -145,7 +143,9 @@ async def test_start_idle_replaces_a_finished_task(caplog) -> None:
 
     coordinator.hass = cast(  # type: ignore[assignment]
         Any,
-        SimpleNamespace(async_create_background_task=Mock(side_effect=create_background_task)),
+        SimpleNamespace(
+            async_create_background_task=Mock(side_effect=create_background_task)
+        ),
     )
 
     with caplog.at_level("WARNING"):
