@@ -55,9 +55,10 @@ def summarize_structured_filters(
     """Return a concise owner-facing description of every active filter."""
     normalized = normalize_structured_filters(filters)
     match_any = normalized.get("match_mode") == "any"
-    details: list[str] = []
+    folder_label = None
     if folder:
-        details.append("Inbox" if folder.upper() == "INBOX" else folder)
+        folder_label = "Inbox" if folder.upper() == "INBOX" else folder
+    details: list[str] = []
     labels = {
         "from": "From contains",
         "to": "To contains",
@@ -98,7 +99,9 @@ def summarize_structured_filters(
         if (value := normalized.get(field))
     )
     if not details:
-        return "All email"
+        return f"All email in {folder_label}" if folder_label else "All email"
+    if folder_label:
+        details.insert(0, folder_label)
     prefix = "Match any condition · " if match_any else ""
     if short and len(details) > 4:
         return prefix + " · ".join(details[:4]) + f" · +{len(details) - 4} more"
@@ -135,20 +138,26 @@ def quote_imap_search_value(value: Any, field: str = "Search value") -> str:
     return f'"{text.replace(chr(92), chr(92) * 2).replace(chr(34), chr(92) + chr(34))}"'
 
 
-def _imap_date(value: Any, field: str) -> str | None:
-    """Convert a date selector value to the locale-independent IMAP format."""
+def _parse_date(value: Any, field: str) -> date | None:
+    """Return one exact filter date while accepting selector-native values."""
     if value in (None, ""):
         return None
     if isinstance(value, datetime):
-        parsed = value.date()
-    elif isinstance(value, date):
-        parsed = value
-    else:
-        text = _clean_text(value, field)
-        try:
-            parsed = date.fromisoformat(text or "")
-        except ValueError as err:
-            raise ValueError(f"{field} must use YYYY-MM-DD") from err
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = _clean_text(value, field)
+    try:
+        return date.fromisoformat(text or "")
+    except ValueError as err:
+        raise ValueError(f"{field} must use YYYY-MM-DD") from err
+
+
+def _imap_date(value: Any, field: str) -> str | None:
+    """Convert a date selector value to the locale-independent IMAP format."""
+    parsed = _parse_date(value, field)
+    if parsed is None:
+        return None
     return f"{parsed.day:02d}-{_MONTHS[parsed.month - 1]}-{parsed.year:04d}"
 
 
@@ -165,12 +174,11 @@ def normalize_structured_filters(filters: Mapping[str, Any]) -> dict[str, Any]:
             normalized[field] = value
     if value := _clean_text(filters.get("attachment_filename"), "attachment_filename"):
         normalized["attachment_filename"] = value
+    parsed_dates: dict[str, date] = {}
     for field in _DATE_FILTERS:
-        if value := filters.get(field):
-            if isinstance(value, (date, datetime)):
-                normalized[field] = value.isoformat()[:10]
-            else:
-                normalized[field] = str(value)
+        if parsed := _parse_date(filters.get(field), field):
+            normalized[field] = parsed.isoformat()
+            parsed_dates[field] = parsed
     for field, allowed in (
         ("read_state", READ_STATES),
         ("starred_state", STARRED_STATES),
@@ -188,10 +196,18 @@ def normalize_structured_filters(filters: Mapping[str, Any]) -> dict[str, Any]:
         if category not in GMAIL_CATEGORIES:
             raise ValueError("Invalid Gmail category")
         normalized["gmail_category"] = category
-    if normalized.get("relative_date") and any(
-        normalized.get(field) for field in _DATE_FILTERS
-    ):
+    if normalized.get("relative_date") and parsed_dates:
         raise ValueError("Relative date cannot be combined with exact date filters")
+    if match_mode == "all":
+        since = parsed_dates.get("since")
+        before = parsed_dates.get("before")
+        on = parsed_dates.get("on")
+        if since and before and since >= before:
+            raise ValueError("Since date must be earlier than Before date")
+        if on and since and on < since:
+            raise ValueError("On date cannot be earlier than Since date")
+        if on and before and on >= before:
+            raise ValueError("On date must be earlier than Before date")
     return normalized
 
 

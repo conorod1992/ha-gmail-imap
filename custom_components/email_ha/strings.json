@@ -69,7 +69,7 @@
       },
       "custom_sensor_common": {
         "title": "Build a custom email sensor",
-        "description": "Create the rule in everyday Gmail terms. Blank text fields and options set to Any are ignored. Choose how the filled filters combine, then optionally preview matches before saving. Gmail performs the matching; this sensor only retrieves a count. Current rule: {summary}.",
+        "description": "Create the rule in everyday Gmail terms. Blank text fields and options set to Any are ignored. Leaving every filter blank counts all email in the selected folder. Choose how filled filters combine, then optionally preview matches before saving. Gmail performs the matching; this sensor only retrieves a count. Current rule: {summary}.",
         "data": {
           "name": "Sensor name",
           "folder": "Search folder",
@@ -87,7 +87,7 @@
         "data_description": {
           "name": "Use a name that describes the result, such as RSA unread or Booking emails.",
           "folder": "Inbox is the usual choice. You can also choose a discovered Gmail folder or enter its exact IMAP name.",
-          "match_mode": "Every filled condition is stricter. At least one filled condition is broader. This choice matters only when more than one filter is filled.",
+          "match_mode": "Every filled condition is stricter. At least one filled condition is broader. Be careful combining At least one with broad conditions such as Read, Not starred, Not important, or No attachment, because the rule may then match most email.",
           "from": "Matches sender name or email address. You can enter part of either, for example rsa.ie.",
           "subject": "Matches text appearing in the subject, for example booking or renewal.",
           "read_state": "Limit the rule to unread or already-read email, or leave as Any.",
@@ -101,7 +101,7 @@
       },
       "custom_sensor_advanced": {
         "title": "Recipient, content and date filters",
-        "description": "Use only the extra conditions you need. They combine with the previous screen using the same Every/At least one choice. Body and text matching are performed by Gmail on the server. For time filtering, choose either a relative period or exact dates, not both. Current rule: {summary}.",
+        "description": "Use only the extra conditions you need. They combine with the previous screen using the same Every/At least one choice. Body and text matching are performed by Gmail on the server. For time filtering, choose either a relative period or exact dates, not both. Exact Since, Before and On dates must describe a range that can actually match. Current rule: {summary}.",
         "data": {
           "to": "To recipient contains",
           "cc": "CC recipient contains",
@@ -121,9 +121,9 @@
           "text": "Ask Gmail to match text anywhere it searches in the message, including headers and body.",
           "attachment_filename": "Match part of an attachment filename, for example .pdf or invoice.",
           "relative_date": "Choose a rolling or calendar-relative period such as Today, Last 24 hours, or Last 7 days.",
-          "since": "Use an exact date only when Relative date is Any time.",
-          "before": "Messages on this date are excluded. Use only when Relative date is Any time.",
-          "on": "Match this exact calendar date. Do not combine with Relative date.",
+          "since": "Use an exact date only when Relative date is Any time. With Every filled condition, this must be earlier than Before.",
+          "before": "Messages on this date are excluded. With Every filled condition, this must be later than Since and later than any On date.",
+          "on": "Match this exact calendar date. Do not combine with Relative date; with Every filled condition it must fall inside any Since/Before range.",
           "test_filter": "Show up to five newest messages that currently match the complete rule before saving."
         }
       },
@@ -144,7 +144,7 @@
       },
       "email_watch_common": {
         "title": "Build an email watch",
-        "description": "Create the arrival rule in everyday Gmail terms. Blank text fields and options set to Any are ignored. The watch fires only for newly observed matching email; message bodies are never included in watch events. Current rule: {summary}.",
+        "description": "Create the arrival rule in everyday Gmail terms. Blank text fields and options set to Any are ignored. If every filter is blank or Any, this watch fires for every newly observed email in the selected folder. The watch fires only for newly observed matching email; message bodies are never included in watch events. Current rule: {summary}.",
         "data": {
           "name": "Watch name",
           "folder": "Watch folder",
@@ -159,12 +159,12 @@
           "more_filters": "Show recipient, content and date filters",
           "test_filter": "Preview matches before saving",
           "enabled": "Watch is enabled",
-          "catch_up": "Catch up email missed while Home Assistant was offline"
+          "catch_up": "Catch up recent email missed during Home Assistant downtime"
         },
         "data_description": {
           "name": "Use a name that describes the event, such as RSA renewal or Booking received.",
           "folder": "Inbox is the usual choice. You can also choose a discovered Gmail folder or enter its exact IMAP name.",
-          "match_mode": "Every filled condition is stricter. At least one filled condition is broader. This choice matters only when more than one filter is filled.",
+          "match_mode": "Every filled condition is stricter. At least one filled condition is broader. Be careful combining At least one with broad conditions such as Read, Not starred, Not important, or No attachment, because the watch may then fire for most new email.",
           "from": "Matches sender name or email address. You can enter part of either, for example rsa.ie.",
           "subject": "Matches text appearing in the subject, for example booking or renewal.",
           "read_state": "Limit the rule to unread or already-read email, or leave as Any.",
@@ -174,13 +174,13 @@
           "attachment_state": "Require an attachment, require no attachment, or ignore attachments.",
           "more_filters": "Continue to To/CC recipients, message text, attachment filename, and date filters.",
           "test_filter": "Preview up to five current matches without changing watch baselines or firing events.",
-          "enabled": "Disable a watch without deleting its rule or event entity.",
-          "catch_up": "When enabled, Email HA remembers a lightweight UID baseline and checks up to 25 messages that arrived while Home Assistant was offline. Older mail is never replayed."
+          "enabled": "Disable a watch without deleting its rule or event entity. While paused, its arrival baseline still advances, so re-enabling it does not replay mail received during the pause.",
+          "catch_up": "When enabled, Email HA checks up to 25 recent messages that arrived after this watch's own last-seen point while Home Assistant was offline. It does not backfill email from before the watch was created or materially changed."
         }
       },
       "email_watch_advanced": {
         "title": "Recipient, content and date filters",
-        "description": "Use only the extra conditions you need. They combine with the previous screen using the same Every/At least one choice. For time filtering, choose either a relative period or exact dates, not both. Current rule: {summary}.",
+        "description": "Use only the extra conditions you need. They combine with the previous screen using the same Every/At least one choice. For time filtering, choose either a relative period or exact dates, not both. Exact Since, Before and On dates must describe a range that can actually match when Every filled condition is selected. Current rule: {summary}.",
         "data": {
           "to": "To recipient contains",
           "cc": "CC recipient contains",
@@ -200,9 +200,9 @@
           "text": "Ask Gmail to match text anywhere it searches in the message, including headers and body.",
           "attachment_filename": "Match part of an attachment filename, for example .pdf or invoice.",
           "relative_date": "Choose a rolling or calendar-relative period such as Today, Last 24 hours, or Last 7 days.",
-          "since": "Use an exact date only when Relative date is Any time.",
-          "before": "Messages on this date are excluded. Use only when Relative date is Any time.",
-          "on": "Match this exact calendar date. Do not combine with Relative date.",
+          "since": "Use an exact date only when Relative date is Any time. With Every filled condition, this must be earlier than Before.",
+          "before": "Messages on this date are excluded. With Every filled condition, this must be later than Since and later than any On date.",
+          "on": "Match this exact calendar date. Do not combine with Relative date; with Every filled condition it must fall inside any Since/Before range.",
           "test_filter": "Preview the complete rule without firing watch events or changing arrival baselines."
         }
       },
@@ -229,8 +229,8 @@
       }
     },
     "error": {
-      "invalid_custom_sensor": "Check the name, folder, filters, and dates. Relative and exact date filters cannot be combined.",
-      "invalid_email_watch": "Check the name, folder, filters, and dates. Relative and exact date filters cannot be combined.",
+      "invalid_custom_sensor": "Check the name, folder, filters, and dates. Relative and exact date filters cannot be combined, and exact Since/Before/On dates must overlap when every condition must match.",
+      "invalid_email_watch": "Check the name, folder, filters, and dates. Relative and exact date filters cannot be combined, and exact Since/Before/On dates must overlap when every condition must match.",
       "invalid_folder": "Choose a non-empty folder without control characters.",
       "filter_test_failed": "Email HA could not test this filter. Check the Gmail connection and try again. Your draft was kept."
     },
