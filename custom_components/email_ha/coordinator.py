@@ -166,16 +166,39 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                 type(err).__name__,
             )
             return
-        self._folder_uid_state = dict(self._state_store.folder_uid_state)
+
+        tracked_folders = {self._folder}
+        tracked_folders.update(
+            str(item.get("folder", DEFAULT_FOLDER))
+            for item in (*self.custom_sensors, *self.email_watches)
+        )
+        persisted_folders = dict(self._state_store.folder_uid_state)
+        self._folder_uid_state = {
+            folder: value
+            for folder, value in persisted_folders.items()
+            if folder in tracked_folders
+        }
         self._restored_folders = set(self._folder_uid_state)
-        custom_ids = {str(item.get("id", "")) for item in self.custom_sensors}
-        watch_ids = {str(item.get("id", "")) for item in self.email_watches}
+        state_needs_save = self._folder_uid_state != persisted_folders
+
+        custom_ids = {
+            sensor_id
+            for item in self.custom_sensors
+            if (sensor_id := str(item.get("id", "")))
+        }
+        watch_ids = {
+            watch_id
+            for item in self.email_watches
+            if (watch_id := str(item.get("id", "")))
+        }
         if self._state_store.has_watch_uid_state:
+            persisted_watch_uid_state = dict(self._state_store.watch_uid_state)
             self._watch_uid_state = {
                 key: value
-                for key, value in self._state_store.watch_uid_state.items()
+                for key, value in persisted_watch_uid_state.items()
                 if key in watch_ids
             }
+            state_needs_save |= self._watch_uid_state != persisted_watch_uid_state
         else:
             # One-time migration from the older folder-only state. Existing watches
             # inherit the folder baseline so an upgrade does not discard a legitimate
@@ -192,17 +215,26 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                         folder_state[0],
                         folder_state[1],
                     )
-            self._schedule_state_save()
+            state_needs_save = True
+
+        persisted_custom_matches = dict(self._state_store.custom_last_new_match)
         self._custom_last_new_match = {
             key: value
-            for key, value in self._state_store.custom_last_new_match.items()
+            for key, value in persisted_custom_matches.items()
             if key in custom_ids
         }
+        state_needs_save |= self._custom_last_new_match != persisted_custom_matches
+
+        persisted_watch_matches = dict(self._state_store.watch_last_new_match)
         self._watch_last_new_match = {
             key: value
-            for key, value in self._state_store.watch_last_new_match.items()
+            for key, value in persisted_watch_matches.items()
             if key in watch_ids
         }
+        state_needs_save |= self._watch_last_new_match != persisted_watch_matches
+
+        if state_needs_save:
+            self._schedule_state_save()
 
     @callback
     def _schedule_state_save(self) -> None:
@@ -797,24 +829,56 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
 
         self._notify_new_emails(data.new_emails)
         self._notify_watch_matches(data.watch_matches)
+        if self._idle_task is not None and self._idle_task.done():
+            self.start_idle()
         return data
 
     def start_idle(self) -> None:
-        """Start the IDLE background task."""
-        if self._idle_task is not None:
+        """Start IDLE, replacing a background task that has already stopped."""
+        if self._idle_task is not None and not self._idle_task.done():
             return
+        if self._idle_task is not None:
+            finished_task = self._idle_task
+            self._idle_task = None
+            if not finished_task.cancelled():
+                try:
+                    err = finished_task.exception()
+                except asyncio.CancelledError:
+                    err = None
+                if err is None:
+                    _LOGGER.warning(
+                        "IDLE task for %s stopped unexpectedly; restarting",
+                        self._email,
+                    )
+                else:
+                    _LOGGER.error(
+                        "IDLE task for %s stopped unexpectedly with %s; restarting",
+                        self._email,
+                        type(err).__name__,
+                        exc_info=(type(err), err, err.__traceback__),
+                    )
         self._idle_task = self.hass.async_create_background_task(
             self._async_idle_loop(), name=f"{DOMAIN}:idle:{self._email}"
         )
 
     async def stop_idle(self) -> None:
-        """Cancel IDLE and wait for a clean shutdown."""
-        if self._idle_task is None:
-            return
-        self._idle_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await self._idle_task
+        """Cancel IDLE and wait for a clean shutdown, even after task failure."""
+        task = self._idle_task
         self._idle_task = None
+        if task is None:
+            return
+        if not task.done():
+            task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception as err:  # noqa: BLE001 - stale task errors must not block unload
+            _LOGGER.debug(
+                "Ignoring already-stopped IDLE task for %s during shutdown: %s",
+                self._email,
+                type(err).__name__,
+            )
 
     async def _async_idle_loop(self) -> None:
         """Reconnect IDLE with bounded exponential backoff."""
@@ -841,6 +905,18 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             ]
             _LOGGER.warning(
                 "IDLE error for %s: %s; reconnecting in %ds",
+                self._email,
+                type(err).__name__,
+                delay,
+            )
+            await asyncio.sleep(delay)
+            return reconnect_attempt + 1
+        except Exception as err:  # noqa: BLE001 - keep the push loop self-healing
+            delay = IDLE_RECONNECT_DELAYS[
+                min(reconnect_attempt, len(IDLE_RECONNECT_DELAYS) - 1)
+            ]
+            _LOGGER.exception(
+                "Unexpected IDLE error for %s: %s; reconnecting in %ds",
                 self._email,
                 type(err).__name__,
                 delay,
