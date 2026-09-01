@@ -85,6 +85,7 @@ def test_rule_builder_copy_warns_about_broad_rules_and_explains_catch_up() -> No
     assert "fires for every newly observed email" in watch["description"]
     assert "may then fire for most new email" in watch["data_description"]["match_mode"]
     assert "watch's own last-seen point" in watch["data_description"]["catch_up"]
-    assert "does not backfill email from before the watch was created" in watch[
-        "data_description"
-    ]["catch_up"]
+    assert (
+        "does not backfill email from before the watch was created"
+        in watch["data_description"]["catch_up"]
+    )
