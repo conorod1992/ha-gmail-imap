@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Coroutine
 import logging
 from typing import Any
 
@@ -19,7 +20,6 @@ from homeassistant.exceptions import (
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.config_entry_oauth2_flow import (
     ImplementationUnavailableError,
-    OAuth2Session,
     async_get_config_entry_implementation,
 )
 from homeassistant.helpers.typing import ConfigType
@@ -57,6 +57,7 @@ from .imap_client import (
     ImapSearchError,
     tokenize_search_criteria,
 )
+from .oauth import EmailHAOAuth2Session
 from .search import (
     ATTACHMENT_STATES,
     GMAIL_CATEGORIES,
@@ -156,7 +157,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = EmailDataUpdateCoordinator(
         hass=hass,
         config_entry=entry,
-        oauth_session=OAuth2Session(hass, entry, implementation),
+        oauth_session=EmailHAOAuth2Session(hass, entry, implementation),
         email_address=entry.data[CONF_EMAIL],
         imap_host=GMAIL_IMAP_HOST,
         imap_port=GMAIL_IMAP_PORT,
@@ -177,7 +178,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(
         entry, [Platform(platform) for platform in PLATFORMS]
     )
-    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+    entry.async_on_unload(
+        entry.add_update_listener(_options_update_listener(dict(entry.options)))
+    )
     coordinator.start_idle()
     entry.async_on_unload(coordinator.stop_idle)
     return True
@@ -193,9 +196,21 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unloaded
 
 
-async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload after entity, custom-sensor, or folder management changes."""
-    await hass.config_entries.async_reload(entry.entry_id)
+def _options_update_listener(
+    initial_options: dict[str, Any],
+) -> Callable[[HomeAssistant, ConfigEntry], Coroutine[Any, Any, None]]:
+    """Reload only when user-managed options change, not when OAuth tokens rotate."""
+    previous_options = dict(initial_options)
+
+    async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+        nonlocal previous_options
+        current_options = dict(entry.options)
+        if current_options == previous_options:
+            return
+        previous_options = current_options
+        await hass.config_entries.async_reload(entry.entry_id)
+
+    return _async_update_listener
 
 
 def _coordinator_for_call(
@@ -240,6 +255,14 @@ async def _connect_for_call(coordinator: EmailDataUpdateCoordinator) -> ImapClie
             _entry_for_coordinator(coordinator).data[CONF_EMAIL],
             str(access_token),
         )
+    except ConfigEntryAuthFailed as err:
+        raise HomeAssistantError(
+            "Gmail authorization expired or was revoked; reauthenticate the integration"
+        ) from err
+    except ConfigEntryNotReady as err:
+        raise HomeAssistantError(
+            "Unable to refresh Gmail authorization; try again later"
+        ) from err
     except ImapAuthError as err:
         raise HomeAssistantError(
             "Gmail rejected authentication; reauthenticate the integration"
@@ -247,9 +270,7 @@ async def _connect_for_call(coordinator: EmailDataUpdateCoordinator) -> ImapClie
     except ImapClientError as err:
         raise HomeAssistantError("Unable to connect to Gmail IMAP") from err
     except Exception as err:
-        raise HomeAssistantError(
-            "OAuth authentication failed; reauthenticate the integration"
-        ) from err
+        raise HomeAssistantError("Unable to authenticate with Gmail") from err
     return client
 
 
