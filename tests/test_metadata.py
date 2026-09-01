@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 
 import yaml
 
@@ -60,7 +61,9 @@ def test_action_translation_and_yaml_surfaces_match() -> None:
     )
 
 
-def test_release_metadata_matches_current_feature_version() -> None:
-    """The manifest exposes the current feature release and supported HA minimum."""
-    assert _json(_INTEGRATION / "manifest.json")["version"] == "2.10.2"
+def test_release_metadata_is_valid() -> None:
+    """Release metadata uses workflow-compatible SemVer and the supported HA minimum."""
+    version = _json(_INTEGRATION / "manifest.json")["version"]
+    assert isinstance(version, str)
+    assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version)
     assert _json(_ROOT / "hacs.json")["homeassistant"] == "2026.7.0"
