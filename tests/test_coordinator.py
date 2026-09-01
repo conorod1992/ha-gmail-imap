@@ -7,7 +7,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from custom_components.email_ha.coordinator import EmailDataUpdateCoordinator
+from custom_components.email_ha.coordinator import (
+    EmailDataUpdateCoordinator,
+    watch_definition_fingerprint,
+)
 from custom_components.email_ha.imap_client import ImapFolderError
 
 
@@ -24,6 +27,7 @@ def _coordinator(account: str = "user@example.com") -> EmailDataUpdateCoordinato
     coordinator.custom_sensors = []
     coordinator._watch_listeners = {}  # noqa: SLF001
     coordinator._folder_uid_state = {}  # noqa: SLF001
+    coordinator._watch_uid_state = {}  # noqa: SLF001
     coordinator._custom_last_new_match = {}  # noqa: SLF001
     coordinator._cached_folders = ["INBOX"]  # noqa: SLF001
     coordinator._folders_fetched_at = float("inf")  # noqa: SLF001
@@ -413,11 +417,17 @@ async def test_inaccessible_custom_folder_does_not_block_healthy_sensor() -> Non
 async def test_healthy_watch_folder_continues_when_another_is_unavailable() -> None:
     """A healthy secondary folder still detects and matches arrivals."""
     coordinator = _coordinator()
+    healthy_watch = {"id": "healthy", "folder": "Receipts", "filters": {}}
     coordinator.email_watches = [
         {"id": "missing", "folder": "Deleted", "filters": {}},
-        {"id": "healthy", "folder": "Receipts", "filters": {}},
+        healthy_watch,
     ]
     coordinator._folder_uid_state["Receipts"] = (8, 40)  # noqa: SLF001
+    coordinator._watch_uid_state["healthy"] = (  # noqa: SLF001
+        watch_definition_fingerprint(healthy_watch),
+        8,
+        40,
+    )
     client = AsyncMock()
 
     async def folder_status(folder: str) -> dict[str, int]:
