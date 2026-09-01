@@ -202,9 +202,7 @@ def _options_update_listener(
     """Reload only when user-managed options change, not when OAuth tokens rotate."""
     previous_options = dict(initial_options)
 
-    async def _async_update_listener(
-        hass: HomeAssistant, entry: ConfigEntry
-    ) -> None:
+    async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
         nonlocal previous_options
         current_options = dict(entry.options)
         if current_options == previous_options:
