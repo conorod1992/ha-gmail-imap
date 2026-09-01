@@ -1,0 +1,199 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (X.Y.Z)"
+        required: true
+        type: string
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      current_version: ${{ steps.version.outputs.current_version }}
+      version: ${{ steps.version.outputs.version }}
+      source_sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Validate target release version
+        id: version
+        env:
+          TARGET_VERSION: ${{ inputs.version }}
+        run: |
+          CURRENT_VERSION="$(python scripts/set_release_version.py --check)"
+          python - "$CURRENT_VERSION" "$TARGET_VERSION" <<'PY'
+          import re
+          import sys
+
+          current, target = sys.argv[1:3]
+          pattern = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+          if not pattern.fullmatch(target):
+              raise SystemExit(f"Release version must use X.Y.Z format, got {target!r}")
+          if not pattern.fullmatch(current):
+              raise SystemExit(f"Current tracked version is not X.Y.Z: {current!r}")
+          if tuple(map(int, target.split("."))) < tuple(map(int, current.split("."))):
+              raise SystemExit(
+                  f"Release version {target} cannot be older than tracked version {current}"
+              )
+          PY
+          echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "version=$TARGET_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify release target is unpublished and newer than latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release $VERSION already exists"
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null 2>&1; then
+            echo "Tag $VERSION already exists"
+            exit 1
+          fi
+          LATEST_RELEASE="$(gh api "repos/${{ github.repository }}/releases/latest" --jq .tag_name 2>/dev/null || true)"
+          if [[ -n "$LATEST_RELEASE" ]]; then
+            python - "$LATEST_RELEASE" "$VERSION" <<'PY'
+          import re
+          import sys
+
+          latest, target = sys.argv[1:3]
+          pattern = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+          if not pattern.fullmatch(latest):
+              raise SystemExit(f"Latest release tag is not X.Y.Z: {latest!r}")
+          if tuple(map(int, target.split("."))) <= tuple(map(int, latest.split("."))):
+              raise SystemExit(
+                  f"Release version {target} must be newer than latest release {latest}"
+              )
+          PY
+          fi
+
+      - name: Capture immutable source commit
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  validate:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout immutable release source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+
+      - name: Stage requested version locally
+        run: |
+          python scripts/set_release_version.py "${{ needs.prepare.outputs.version }}"
+          python scripts/set_release_version.py --check
+          git diff --check
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.test.txt
+
+      - name: Install test tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.test.txt
+
+      - name: Python tests
+        run: pytest
+
+      - name: Ruff lint and format
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Pyright
+        run: pyright
+
+      - name: Home Assistant validation
+        uses: home-assistant/actions/hassfest@master
+
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
+
+  finalize:
+    needs:
+      - prepare
+      - validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout main for finalization
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Refuse to publish from a stale source commit
+        env:
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+        run: |
+          git fetch origin main
+          MAIN_SHA="$(git rev-parse origin/main)"
+          if [[ "$MAIN_SHA" != "$SOURCE_SHA" ]]; then
+            echo "main moved from $SOURCE_SHA to $MAIN_SHA while release validation was running"
+            echo "No version bump or GitHub release has been published. Re-run Release from current main."
+            exit 1
+          fi
+          git checkout -B main origin/main
+
+      - name: Stage release version
+        run: |
+          python scripts/set_release_version.py "${{ needs.prepare.outputs.version }}"
+          python scripts/set_release_version.py --check
+          git diff --check
+
+      - name: Commit manifest version when needed
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/email_ha/manifest.json
+          if git diff --cached --quiet; then
+            echo "Manifest already uses $VERSION; no release bump commit is needed."
+          else
+            git commit -m "chore: bump version to $VERSION"
+            git push origin HEAD:main
+          fi
+
+      - name: Build HACS release archive
+        run: |
+          cd custom_components/email_ha
+          zip -r ../../email_ha.zip .
+          cd ../..
+          test -s email_ha.zip
+
+      - name: Create GitHub release with archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          RELEASE_SHA="$(git rev-parse HEAD)"
+          gh release create "$VERSION" email_ha.zip \
+            --target "$RELEASE_SHA" \
+            --title "$VERSION" \
+            --generate-notes

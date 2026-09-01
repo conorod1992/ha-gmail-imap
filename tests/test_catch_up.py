@@ -18,6 +18,7 @@ from custom_components.email_ha.coordinator import (
 def _coordinator() -> EmailDataUpdateCoordinator:
     coordinator = object.__new__(EmailDataUpdateCoordinator)
     coordinator._email = "user@example.com"  # noqa: SLF001
+    coordinator._folder = "INBOX"  # noqa: SLF001
     coordinator._folder_uid_state = {}  # noqa: SLF001
     coordinator._restored_folders = set()  # noqa: SLF001
     coordinator._watch_uid_state = {}  # noqa: SLF001
