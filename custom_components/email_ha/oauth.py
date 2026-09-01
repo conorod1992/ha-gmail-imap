@@ -12,9 +12,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.config_entry_oauth2_flow import OAuth2Session
 
 _MIN_TOKEN_LIFETIME_SECONDS = 10 * 60
-_HAS_NATIVE_OAUTH_ERROR_SEMANTICS = hasattr(
-    ha_exceptions, "OAuth2TokenRequestError"
-)
+_HAS_NATIVE_OAUTH_ERROR_SEMANTICS = hasattr(ha_exceptions, "OAuth2TokenRequestError")
 
 
 class EmailHAOAuth2Session(OAuth2Session):
