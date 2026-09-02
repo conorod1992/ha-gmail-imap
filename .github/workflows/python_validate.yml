@@ -1,6 +1,15 @@
 name: Python package
 
-on: [push]
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: python-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -12,23 +21,32 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements.test.txt
 
       - name: Set PY env
-        run: echo "PY=$(python -VV | sha256sum | cut -d' ' -f1)" >> $GITHUB_ENV
+        run: echo "PY=$(python -VV | sha256sum | cut -d' ' -f1)" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.test.txt
+
+      - name: Validate release metadata
+        run: python scripts/set_release_version.py --check
+
       - name: Run pytest
         run: pytest
+
       - name: Run Ruff
         run: |
           ruff check .
           ruff format --check .
+
       - name: Run Pyright
         run: pyright
