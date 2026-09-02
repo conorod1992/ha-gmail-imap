@@ -7,6 +7,7 @@ from collections.abc import Sequence
 import contextlib
 import re
 import shlex
+import ssl
 from typing import Any, Self, cast
 
 import aioimaplib
@@ -109,8 +110,14 @@ class ImapClient:
     async def connect(self, user: str, access_token: str) -> None:
         """Open TLS and authenticate with XOAUTH2 without logging secrets."""
         try:
+            ssl_context = await asyncio.to_thread(
+                ssl.create_default_context, ssl.Purpose.SERVER_AUTH
+            )
             client = aioimaplib.IMAP4_SSL(
-                host=self._host, port=self._port, timeout=IMAP_TIMEOUT
+                host=self._host,
+                port=self._port,
+                timeout=IMAP_TIMEOUT,
+                ssl_context=ssl_context,
             )
             async with asyncio.timeout(IMAP_TIMEOUT):
                 await client.wait_hello_from_server()
