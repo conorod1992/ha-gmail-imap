@@ -96,7 +96,7 @@ jobs:
           MSG="<!-- version-check -->
           ⚠️ **Do not bump \`custom_components/email_ha/manifest.json\` in development PRs.**
 
-          The manual **Release** workflow now owns release version changes. Revert the manifest version to \`$BASE_VERSION\`; when the merged code is ready to publish, run the Release workflow and enter the target \`X.Y.Z\` version there.
+          The manual **Release** workflow owns release version changes. Revert the manifest version to \`$BASE_VERSION\`; when the merged code is ready to publish, run the Release workflow and enter the target \`X.Y.Z\` version there.
 
           This keeps feature/fix PRs independent from release timing and prevents merge conflicts between parallel PRs."
 
