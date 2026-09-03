@@ -169,9 +169,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             _LOGGER,
             config_entry=config_entry,
             name=f"{DOMAIN}:{email_address}",
-            update_interval=_coordinator_refresh_interval(
-                folder, self.email_watches
-            ),
+            update_interval=_coordinator_refresh_interval(folder, self.email_watches),
         )
 
     async def async_load_state(self) -> None:
