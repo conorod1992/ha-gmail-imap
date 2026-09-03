@@ -45,3 +45,4 @@ jobs:
           git add custom_components/email_ha/coordinator.py tests/test_secondary_watch_refresh.py
           git commit -m "fix: refresh secondary email watches promptly"
           git push
+# trigger
