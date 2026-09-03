@@ -61,6 +61,23 @@ def _coordinator_refresh_interval(
     return timedelta(seconds=seconds)
 
 
+def _coordinator_refresh_interval(
+    monitored_folder: str, email_watches: list[dict[str, Any]]
+) -> timedelta:
+    """Return a shorter fallback interval when IDLE cannot cover every watch."""
+    has_secondary_watch = any(
+        watch.get("enabled", True)
+        and str(watch.get("folder", DEFAULT_FOLDER)) != monitored_folder
+        for watch in email_watches
+    )
+    seconds = (
+        _SECONDARY_WATCH_REFRESH_INTERVAL
+        if has_secondary_watch
+        else IDLE_FALLBACK_REFRESH_INTERVAL
+    )
+    return timedelta(seconds=seconds)
+
+
 def watch_definition_fingerprint(definition: dict[str, Any]) -> str:
     """Return a privacy-safe fingerprint of fields that change watch eligibility."""
     material = {
