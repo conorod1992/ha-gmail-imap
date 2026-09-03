@@ -11,7 +11,7 @@ from custom_components.email_ha.coordinator import (
     EmailDataUpdateCoordinator,
     watch_definition_fingerprint,
 )
-from custom_components.email_ha.imap_client import ImapFolderError
+from custom_components.email_ha.imap_client import ImapClientError, ImapFolderError
 
 
 def _coordinator(account: str = "user@example.com") -> EmailDataUpdateCoordinator:
@@ -543,3 +543,44 @@ def test_watch_listeners_are_isolated_between_accounts() -> None:
 
     assert first_events[0]["account"] == "first@example.com"
     assert second_events == []
+
+
+@pytest.mark.asyncio
+async def test_optional_folder_missing_is_local_rule_failure() -> None:
+    """A genuinely unavailable optional folder stays isolated to that rule."""
+    coordinator = _coordinator()
+    client = AsyncMock()
+    client.get_folder_status.side_effect = ImapFolderError("missing")
+
+    result = await coordinator._async_folder_status(  # noqa: SLF001
+        client, "Receipts", required=False
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_optional_folder_transient_imap_failure_propagates() -> None:
+    """A network/server failure aborts the refresh so normal retry can run."""
+    coordinator = _coordinator()
+    client = AsyncMock()
+    client.get_folder_status.side_effect = ImapClientError("connection dropped")
+
+    with pytest.raises(ImapClientError):
+        await coordinator._async_folder_status(  # noqa: SLF001
+            client, "Receipts", required=False
+        )
+
+
+@pytest.mark.asyncio
+async def test_optional_folder_validation_failure_remains_isolated() -> None:
+    """A local invalid-folder value does not masquerade as a connection outage."""
+    coordinator = _coordinator()
+    client = AsyncMock()
+    client.get_folder_status.side_effect = ValueError("invalid folder")
+
+    result = await coordinator._async_folder_status(  # noqa: SLF001
+        client, "Receipts", required=False
+    )
+
+    assert result is None

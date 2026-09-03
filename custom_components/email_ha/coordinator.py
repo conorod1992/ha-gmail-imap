@@ -601,7 +601,12 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                 "Configured folder %s is unavailable for %s", folder, self._email
             )
             return None
-        except (ImapClientError, ValueError) as err:
+        except ImapClientError:
+            # A connection/server failure is not a folder configuration problem.
+            # Propagate it so the coordinator/IDLE loop can retry the whole refresh
+            # rather than publishing a partial success and marking the watch broken.
+            raise
+        except ValueError as err:
             if required:
                 raise
             _LOGGER.warning(
