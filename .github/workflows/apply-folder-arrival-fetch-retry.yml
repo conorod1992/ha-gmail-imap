@@ -1,0 +1,46 @@
+name: Apply folder arrival fetch retry fix
+
+on:
+  push:
+    branches:
+      - fix/folder-arrival-fetch-retry
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/folder-arrival-fetch-retry
+      - name: Apply fix and regression test
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('custom_components/email_ha/coordinator.py')
+          text = path.read_text()
+          old = '''        restored_folders = getattr(self, "_restored_folders", set())\n        restored = folder in restored_folders\n        restored_folders.discard(folder)\n\n        if previous is None or previous[0] != uid_validity:\n            self._folder_uid_state[folder] = (uid_validity, highest_uid)\n            return []\n\n        last_seen = previous[1]\n        self._folder_uid_state[folder] = (uid_validity, highest_uid)\n        if highest_uid <= last_seen or not fetch_messages:\n            return []\n\n        if restored and not allow_catch_up:\n            return []\n\n        limit = MAX_CATCH_UP_EVENTS if restored else MAX_NEW_EMAIL_EVENTS\n        messages, match_count = await client.get_new_emails(folder, last_seen, limit)\n'''
+          new = '''        restored_folders = getattr(self, "_restored_folders", set())\n        restored = folder in restored_folders\n\n        if previous is None or previous[0] != uid_validity:\n            self._folder_uid_state[folder] = (uid_validity, highest_uid)\n            restored_folders.discard(folder)\n            return []\n\n        last_seen = previous[1]\n        if highest_uid <= last_seen or not fetch_messages:\n            self._folder_uid_state[folder] = (uid_validity, highest_uid)\n            restored_folders.discard(folder)\n            return []\n\n        if restored and not allow_catch_up:\n            self._folder_uid_state[folder] = (uid_validity, highest_uid)\n            restored_folders.discard(folder)\n            return []\n\n        limit = MAX_CATCH_UP_EVENTS if restored else MAX_NEW_EMAIL_EVENTS\n        messages, match_count = await client.get_new_emails(folder, last_seen, limit)\n        self._folder_uid_state[folder] = (uid_validity, highest_uid)\n        restored_folders.discard(folder)\n'''
+          if old not in text:
+              raise SystemExit('target block not found')
+          path.write_text(text.replace(old, new, 1))
+
+          test_path = Path('tests/test_coordinator.py')
+          tests = test_path.read_text()
+          if 'ImapClientError' not in tests.split('\n', 20)[0:20]:
+              pass
+          test = '''\n\n@pytest.mark.asyncio\nasync def test_filtered_arrival_fetch_failure_preserves_baseline_for_retry() -> None:\n    """A transient candidate fetch failure must not consume the folder baseline."""\n    coordinator = _coordinator()\n    coordinator._folder_uid_state = {"Receipts": (9, 100)}  # noqa: SLF001\n    coordinator._restored_folders = {"Receipts"}  # noqa: SLF001\n    client = AsyncMock()\n    client.get_new_emails.side_effect = [\n        ImapClientError("connection dropped"),\n        ([_message("101")], 1),\n    ]\n\n    with pytest.raises(ImapClientError):\n        await coordinator._async_detect_folder_new_emails(  # noqa: SLF001\n            client,\n            "Receipts",\n            {"uidvalidity": 9, "uidnext": 102},\n            fetch_messages=True,\n            allow_catch_up=True,\n        )\n\n    assert coordinator._folder_uid_state["Receipts"] == (9, 100)  # noqa: SLF001\n    assert "Receipts" in coordinator._restored_folders  # noqa: SLF001\n\n    retry = await coordinator._async_detect_folder_new_emails(  # noqa: SLF001\n        client,\n        "Receipts",\n        {"uidvalidity": 9, "uidnext": 102},\n        fetch_messages=True,\n        allow_catch_up=True,\n    )\n\n    assert [message["uid"] for message in retry] == ["101"]\n    assert coordinator._folder_uid_state["Receipts"] == (9, 101)  # noqa: SLF001\n    assert "Receipts" not in coordinator._restored_folders  # noqa: SLF001\n    assert client.get_new_emails.await_count == 2\n'''
+          tests += test
+          test_path.write_text(tests)
+          PY
+      - name: Commit changes
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add custom_components/email_ha/coordinator.py tests/test_coordinator.py
+          git commit -m "fix: retry filtered arrivals after fetch failure"
+          git push
