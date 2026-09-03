@@ -1,0 +1,56 @@
+name: Apply IMAP selection cache
+
+on:
+  push:
+    branches:
+      - perf/cache-imap-selection
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/cache-imap-selection
+      - name: Apply code and tests
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('custom_components/email_ha/imap_client.py')
+          text = path.read_text()
+          text = text.replace(
+              '        self._client: aioimaplib.IMAP4_SSL | None = None\n',
+              '        self._client: aioimaplib.IMAP4_SSL | None = None\n        self._selected_folder: str | None = None\n',
+              1,
+          )
+          text = text.replace(
+              '        self._client = client\n\n    async def disconnect',
+              '        self._client = client\n        self._selected_folder = None\n\n    async def disconnect',
+              1,
+          )
+          text = text.replace(
+              '        finally:\n            self._client = None\n\n    async def list_folders',
+              '        finally:\n            self._client = None\n            self._selected_folder = None\n\n    async def list_folders',
+              1,
+          )
+          old = '''    async def _select_read_only(self, folder: str) -> None:\n        folder = validate_imap_folder(folder)\n        client = self._require_client()\n        response = await client.examine(folder)\n        if response.result != "OK":\n            raise ImapFolderError("The selected folder is not accessible")\n        # aioimaplib 2.0.1 sends EXAMINE but does not update its local state,\n        # which would incorrectly reject the following UID FETCH/SEARCH.\n        if client.protocol is not None:\n            client.protocol.state = "SELECTED"\n'''
+          new = '''    async def _select_read_only(self, folder: str) -> None:\n        folder = validate_imap_folder(folder)\n        client = self._require_client()\n        if self._selected_folder == folder:\n            return\n        response = await client.examine(folder)\n        if response.result != "OK":\n            raise ImapFolderError("The selected folder is not accessible")\n        # aioimaplib 2.0.1 sends EXAMINE but does not update its local state,\n        # which would incorrectly reject the following UID FETCH/SEARCH.\n        if client.protocol is not None:\n            client.protocol.state = "SELECTED"\n        self._selected_folder = folder\n'''
+          if old not in text:
+              raise SystemExit('selection method marker not found')
+          text = text.replace(old, new, 1)
+          path.write_text(text)
+
+          Path('tests/test_imap_selection.py').write_text('''"""Tests for read-only IMAP folder selection caching."""\n\nfrom types import SimpleNamespace\nfrom unittest.mock import AsyncMock\n\nimport pytest\n\nfrom custom_components.email_ha.imap_client import ImapClient, ImapFolderError\n\n\ndef _client() -> tuple[ImapClient, AsyncMock]:\n    wrapper = ImapClient("imap.example.com")\n    client = AsyncMock()\n    client.protocol = SimpleNamespace(state="AUTH")\n    client.examine.return_value = SimpleNamespace(result="OK")\n    wrapper._client = client  # noqa: SLF001\n    return wrapper, client\n\n\n@pytest.mark.asyncio\nasync def test_repeated_selection_of_same_folder_uses_one_examine() -> None:\n    """Repeated operations in one mailbox do not re-EXAMINE it."""\n    wrapper, client = _client()\n\n    await wrapper._select_read_only("INBOX")  # noqa: SLF001\n    await wrapper._select_read_only("INBOX")  # noqa: SLF001\n\n    client.examine.assert_awaited_once_with("INBOX")\n    assert client.protocol.state == "SELECTED"\n\n\n@pytest.mark.asyncio\nasync def test_switching_folder_performs_new_examine() -> None:\n    """Changing mailboxes still selects the requested folder explicitly."""\n    wrapper, client = _client()\n\n    await wrapper._select_read_only("INBOX")  # noqa: SLF001\n    await wrapper._select_read_only("Receipts")  # noqa: SLF001\n\n    assert client.examine.await_args_list[0].args == ("INBOX",)\n    assert client.examine.await_args_list[1].args == ("Receipts",)\n    assert client.examine.await_count == 2\n\n\n@pytest.mark.asyncio\nasync def test_failed_selection_is_not_cached() -> None:\n    """A failed EXAMINE is retried rather than poisoning selection state."""\n    wrapper, client = _client()\n    client.examine.side_effect = [\n        SimpleNamespace(result="NO"),\n        SimpleNamespace(result="OK"),\n    ]\n\n    with pytest.raises(ImapFolderError):\n        await wrapper._select_read_only("Receipts")  # noqa: SLF001\n    await wrapper._select_read_only("Receipts")  # noqa: SLF001\n\n    assert client.examine.await_count == 2\n\n\n@pytest.mark.asyncio\nasync def test_disconnect_clears_selected_folder() -> None:\n    """A reconnect cannot inherit mailbox state from the old IMAP session."""\n    wrapper, client = _client()\n    await wrapper._select_read_only("INBOX")  # noqa: SLF001\n\n    await wrapper.disconnect()\n\n    assert wrapper._selected_folder is None  # noqa: SLF001\n    client.logout.assert_awaited_once()\n''')
+          PY
+      - name: Commit changes
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add custom_components/email_ha/imap_client.py tests/test_imap_selection.py
+          git commit -m "perf: avoid redundant IMAP folder selections"
+          git push
