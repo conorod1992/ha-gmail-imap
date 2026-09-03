@@ -98,6 +98,7 @@ class ImapClient:
         self._host = host
         self._port = port
         self._client: aioimaplib.IMAP4_SSL | None = None
+        self._selected_folder: str | None = None
 
     async def __aenter__(self) -> Self:
         """Enter the connection context."""
@@ -129,6 +130,7 @@ class ImapClient:
                 await client.logout()
             raise ImapAuthError("Gmail rejected IMAP authentication")
         self._client = client
+        self._selected_folder = None
 
     async def disconnect(self) -> None:
         """Log out and release the connection."""
@@ -141,6 +143,7 @@ class ImapClient:
             pass
         finally:
             self._client = None
+            self._selected_folder = None
 
     async def list_folders(self) -> list[str]:
         """Return selectable folder names."""
@@ -331,6 +334,8 @@ class ImapClient:
     async def _select_read_only(self, folder: str) -> None:
         folder = validate_imap_folder(folder)
         client = self._require_client()
+        if self._selected_folder == folder:
+            return
         response = await client.examine(folder)
         if response.result != "OK":
             raise ImapFolderError("The selected folder is not accessible")
@@ -338,6 +343,7 @@ class ImapClient:
         # which would incorrectly reject the following UID FETCH/SEARCH.
         if client.protocol is not None:
             client.protocol.state = "SELECTED"
+        self._selected_folder = folder
 
     async def select_folder_read_only(self, folder: str) -> None:
         """Select a folder read-only before entering IMAP IDLE."""
