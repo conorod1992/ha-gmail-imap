@@ -54,3 +54,4 @@ jobs:
           git add custom_components/email_ha/imap_client.py tests/test_imap_selection.py
           git commit -m "perf: avoid redundant IMAP folder selections"
           git push
+# trigger
