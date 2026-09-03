@@ -1,3 +1,4 @@
+# Temporary branch-only patch runner; removes itself after applying the fix.
 name: Apply watch baseline retry fix
 
 on:
@@ -135,11 +136,6 @@ jobs:
 
           test_path = Path("tests/test_catch_up.py")
           tests = test_path.read_text()
-          tests = tests.replace(
-              "from custom_components.email_ha.coordinator import (\n",
-              "from custom_components.email_ha.coordinator import (\n",
-              1,
-          )
           import_anchor = "from custom_components.email_ha.coordinator import (\n    EmailDataUpdateCoordinator,\n    watch_definition_fingerprint,\n)\n"
           import_replacement = import_anchor + "from custom_components.email_ha.imap_client import ImapClientError\n"
           if import_anchor not in tests:
@@ -224,5 +220,5 @@ async def test_watch_match_failure_retries_unacknowledged_arrival() -> None:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add custom_components/email_ha/coordinator.py tests/test_catch_up.py .github/workflows/apply-watch-baseline-fix.yml
-          git commit -m "Fix watch retry after transient match failure"
+          git commit -m "fix: retry watch arrivals after transient match failure"
           git push
