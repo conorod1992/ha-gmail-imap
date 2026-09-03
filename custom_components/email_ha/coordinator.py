@@ -454,7 +454,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
     def _prepare_watch_uid_floors(
         self, folder_statuses: dict[str, dict[str, int]]
     ) -> dict[str, int]:
-        """Return prior per-watch floors and advance each watch to current UID state."""
+        """Return prior per-watch floors without acknowledging untested arrivals."""
         floors: dict[str, int] = {}
         current_watch_ids: set[str] = set()
         state = getattr(self, "_watch_uid_state", {})
@@ -477,12 +477,11 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                 and previous[1] == uid_validity
             ):
                 floors[watch_id] = previous[2]
-                highest_uid = max(highest_uid, previous[2])
             else:
                 # A new/materially changed watch must never inherit older arrivals
                 # fetched for another watch sharing the same folder.
                 floors[watch_id] = highest_uid
-            state[watch_id] = (fingerprint, uid_validity, highest_uid)
+                state[watch_id] = (fingerprint, uid_validity, highest_uid)
         self._watch_uid_state = {
             watch_id: value
             for watch_id, value in state.items()
@@ -558,6 +557,16 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                 )
                 if is_watch:
                     self._set_rule_success(definition_id, checked_at=observed_at)
+                    watch_state = self._watch_uid_state.get(definition_id)
+                    if watch_state is not None:
+                        acknowledged_uid = max(
+                            int(str(message["uid"])) for message in candidate_messages
+                        )
+                        self._watch_uid_state[definition_id] = (
+                            watch_state[0],
+                            watch_state[1],
+                            max(watch_state[2], acknowledged_uid),
+                        )
                 for message in candidate_messages:
                     if str(message.get("uid", "")) not in matching_uids:
                         continue
@@ -576,6 +585,18 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                         err,
                         "Email watch query failed",
                     )
+                    if isinstance(err, ImapClientError):
+                        watch_state = self._watch_uid_state.get(definition_id)
+                        folder_state = self._folder_uid_state.get(folder)
+                        if (
+                            watch_state is not None
+                            and folder_state is not None
+                            and watch_state[1] == folder_state[0]
+                        ):
+                            self._folder_uid_state[folder] = (
+                                folder_state[0],
+                                min(folder_state[1], watch_state[2]),
+                            )
                 _LOGGER.warning(
                     "Unable to match filtered definition %s for %s: %s",
                     definition_id,
