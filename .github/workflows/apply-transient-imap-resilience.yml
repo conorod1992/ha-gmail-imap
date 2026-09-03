@@ -1,0 +1,48 @@
+name: Apply transient IMAP resilience
+
+on:
+  push:
+    branches:
+      - fix/transient-imap-resilience
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/transient-imap-resilience
+      - name: Apply code and tests
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('custom_components/email_ha/coordinator.py')
+          text = path.read_text()
+          old = '''        except (ImapClientError, ValueError) as err:\n            if required:\n                raise\n            _LOGGER.warning(\n                "Unable to query tracked folder %s for %s: %s",\n                folder,\n                self._email,\n                type(err).__name__,\n            )\n            return None\n'''
+          new = '''        except ImapClientError:\n            # A connection/server failure is not a folder configuration problem.\n            # Propagate it so the coordinator/IDLE loop can retry the whole refresh\n            # rather than publishing a partial success and marking the watch broken.\n            raise\n        except ValueError as err:\n            if required:\n                raise\n            _LOGGER.warning(\n                "Unable to query tracked folder %s for %s: %s",\n                folder,\n                self._email,\n                type(err).__name__,\n            )\n            return None\n'''
+          if old not in text:
+              raise SystemExit('coordinator marker not found')
+          path.write_text(text.replace(old, new, 1))
+
+          test_path = Path('tests/test_coordinator.py')
+          tests = test_path.read_text()
+          tests = tests.replace(
+              'from custom_components.email_ha.imap_client import ImapFolderError\n',
+              'from custom_components.email_ha.imap_client import ImapClientError, ImapFolderError\n',
+              1,
+          )
+          tests += '''\n\n@pytest.mark.asyncio\nasync def test_optional_folder_missing_is_local_rule_failure() -> None:\n    """A genuinely unavailable optional folder stays isolated to that rule."""\n    coordinator = _coordinator()\n    client = AsyncMock()\n    client.get_folder_status.side_effect = ImapFolderError("missing")\n\n    result = await coordinator._async_folder_status(  # noqa: SLF001\n        client, "Receipts", required=False\n    )\n\n    assert result is None\n\n\n@pytest.mark.asyncio\nasync def test_optional_folder_transient_imap_failure_propagates() -> None:\n    """A network/server failure aborts the refresh so normal retry can run."""\n    coordinator = _coordinator()\n    client = AsyncMock()\n    client.get_folder_status.side_effect = ImapClientError("connection dropped")\n\n    with pytest.raises(ImapClientError):\n        await coordinator._async_folder_status(  # noqa: SLF001\n            client, "Receipts", required=False\n        )\n\n\n@pytest.mark.asyncio\nasync def test_optional_folder_validation_failure_remains_isolated() -> None:\n    """A local invalid-folder value does not masquerade as a connection outage."""\n    coordinator = _coordinator()\n    client = AsyncMock()\n    client.get_folder_status.side_effect = ValueError("invalid folder")\n\n    result = await coordinator._async_folder_status(  # noqa: SLF001\n        client, "Receipts", required=False\n    )\n\n    assert result is None\n'''
+          test_path.write_text(tests)
+          PY
+      - name: Commit changes
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add custom_components/email_ha/coordinator.py tests/test_coordinator.py
+          git commit -m "fix: retry transient tracked-folder IMAP failures"
+          git push
