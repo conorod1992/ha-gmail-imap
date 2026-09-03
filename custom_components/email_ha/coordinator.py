@@ -443,22 +443,27 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         previous = self._folder_uid_state.get(folder)
         restored_folders = getattr(self, "_restored_folders", set())
         restored = folder in restored_folders
-        restored_folders.discard(folder)
 
         if previous is None or previous[0] != uid_validity:
             self._folder_uid_state[folder] = (uid_validity, highest_uid)
+            restored_folders.discard(folder)
             return []
 
         last_seen = previous[1]
-        self._folder_uid_state[folder] = (uid_validity, highest_uid)
         if highest_uid <= last_seen or not fetch_messages:
+            self._folder_uid_state[folder] = (uid_validity, highest_uid)
+            restored_folders.discard(folder)
             return []
 
         if restored and not allow_catch_up:
+            self._folder_uid_state[folder] = (uid_validity, highest_uid)
+            restored_folders.discard(folder)
             return []
 
         limit = MAX_CATCH_UP_EVENTS if restored else MAX_NEW_EMAIL_EVENTS
         messages, match_count = await client.get_new_emails(folder, last_seen, limit)
+        self._folder_uid_state[folder] = (uid_validity, highest_uid)
+        restored_folders.discard(folder)
         if match_count > limit:
             _LOGGER.warning(
                 "Received %d messages since the previous %s baseline for %s; checking the newest %d",
