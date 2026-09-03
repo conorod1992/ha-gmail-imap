@@ -1,0 +1,38 @@
+name: Fix PR26 formatting
+
+on:
+  push:
+    branches:
+      - fix/secondary-watch-refresh-clean
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/secondary-watch-refresh-clean
+      - name: Apply Ruff formatting fix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('custom_components/email_ha/coordinator.py')
+          text = path.read_text()
+          old = '''            update_interval=_coordinator_refresh_interval(\n                folder, self.email_watches\n            ),\n'''
+          new = '''            update_interval=_coordinator_refresh_interval(folder, self.email_watches),\n'''
+          if old not in text:
+              raise SystemExit('formatting marker not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          git rm .github/workflows/fix-pr26-format.yml
+      - name: Commit fix
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add custom_components/email_ha/coordinator.py
+          git commit -m "style: format coordinator refresh interval"
+          git push
