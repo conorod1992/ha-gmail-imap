@@ -40,7 +40,25 @@ from .state import EmailStateStore
 _LOGGER = logging.getLogger(__name__)
 
 _FOLDER_REFRESH_INTERVAL = 86400
+_SECONDARY_WATCH_REFRESH_INTERVAL = 60
 _CATCH_UP_MARKER = "_email_ha_caught_up"
+
+
+def _coordinator_refresh_interval(
+    monitored_folder: str, email_watches: list[dict[str, Any]]
+) -> timedelta:
+    """Return a shorter fallback interval when IDLE cannot cover every watch."""
+    has_secondary_watch = any(
+        watch.get("enabled", True)
+        and str(watch.get("folder", DEFAULT_FOLDER)) != monitored_folder
+        for watch in email_watches
+    )
+    seconds = (
+        _SECONDARY_WATCH_REFRESH_INTERVAL
+        if has_secondary_watch
+        else IDLE_FALLBACK_REFRESH_INTERVAL
+    )
+    return timedelta(seconds=seconds)
 
 
 def watch_definition_fingerprint(definition: dict[str, Any]) -> str:
@@ -151,7 +169,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
             _LOGGER,
             config_entry=config_entry,
             name=f"{DOMAIN}:{email_address}",
-            update_interval=timedelta(seconds=IDLE_FALLBACK_REFRESH_INTERVAL),
+            update_interval=_coordinator_refresh_interval(folder, self.email_watches),
         )
 
     async def async_load_state(self) -> None:
