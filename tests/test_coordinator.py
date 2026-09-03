@@ -584,3 +584,41 @@ async def test_optional_folder_validation_failure_remains_isolated() -> None:
     )
 
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_filtered_arrival_fetch_failure_preserves_baseline_for_retry() -> None:
+    """A transient candidate fetch failure must not consume the folder baseline."""
+    coordinator = _coordinator()
+    coordinator._folder_uid_state = {"Receipts": (9, 100)}  # noqa: SLF001
+    coordinator._restored_folders = {"Receipts"}  # noqa: SLF001
+    client = AsyncMock()
+    client.get_new_emails.side_effect = [
+        ImapClientError("connection dropped"),
+        ([_message("101")], 1),
+    ]
+
+    with pytest.raises(ImapClientError):
+        await coordinator._async_detect_folder_new_emails(  # noqa: SLF001
+            client,
+            "Receipts",
+            {"uidvalidity": 9, "uidnext": 102},
+            fetch_messages=True,
+            allow_catch_up=True,
+        )
+
+    assert coordinator._folder_uid_state["Receipts"] == (9, 100)  # noqa: SLF001
+    assert "Receipts" in coordinator._restored_folders  # noqa: SLF001
+
+    retry = await coordinator._async_detect_folder_new_emails(  # noqa: SLF001
+        client,
+        "Receipts",
+        {"uidvalidity": 9, "uidnext": 102},
+        fetch_messages=True,
+        allow_catch_up=True,
+    )
+
+    assert [message["uid"] for message in retry] == ["101"]
+    assert coordinator._folder_uid_state["Receipts"] == (9, 101)  # noqa: SLF001
+    assert "Receipts" not in coordinator._restored_folders  # noqa: SLF001
+    assert client.get_new_emails.await_count == 2
