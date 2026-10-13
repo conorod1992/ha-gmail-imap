@@ -76,12 +76,8 @@ async def test_load_state_prunes_deleted_rules_and_folders() -> None:
         "Archive",
     }
     assert coordinator._watch_uid_state == {"watch": ("keep", 3, 30)}
-    assert coordinator._custom_last_new_match == {
-        "sensor": "2026-09-01T00:00:00+00:00"
-    }
-    assert coordinator._watch_last_new_match == {
-        "watch": "2026-09-01T00:00:00+00:00"
-    }
+    assert coordinator._custom_last_new_match == {"sensor": "2026-09-01T00:00:00+00:00"}
+    assert coordinator._watch_last_new_match == {"watch": "2026-09-01T00:00:00+00:00"}
     assert state_store.folder_uid_state == coordinator._folder_uid_state
     state_store.async_schedule_save.assert_called_once()
 
