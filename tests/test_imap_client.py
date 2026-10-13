@@ -61,7 +61,7 @@ async def test_search_uses_read_only_header_peek() -> None:
         ],
     )
     client = ImapClient("imap.gmail.com")
-    client._client = protocol  # noqa: SLF001
+    client._client = protocol
 
     result = await client.search_emails("INBOX", "ALL", 10)
 
@@ -91,7 +91,7 @@ async def test_search_include_body_uses_body_peek_and_limit() -> None:
         ],
     )
     client = ImapClient("imap.gmail.com")
-    client._client = protocol  # noqa: SLF001
+    client._client = protocol
 
     result = await client.search_emails(
         "INBOX", "ALL", 10, include_body=True, body_max_chars=4
@@ -115,7 +115,7 @@ async def test_structured_search_include_body_uses_same_fetch_path() -> None:
         [b"1 (UID 7 FLAGS ())", b"Subject: Example\r\n\r\nBody", b")"],
     )
     client = ImapClient("imap.gmail.com")
-    client._client = protocol  # noqa: SLF001
+    client._client = protocol
 
     result = await client.search_emails_tokens(
         "INBOX", ["UNSEEN"], include_body=True, body_max_chars=100
@@ -132,7 +132,7 @@ async def test_count_search_does_not_fetch_messages() -> None:
     protocol.examine.return_value = _Response("OK", [b"3"])
     protocol.uid_search.return_value = _Response("OK", [b"3 5 8"])
     client = ImapClient("imap.gmail.com")
-    client._client = protocol  # noqa: SLF001
+    client._client = protocol
 
     count, newest_uid = await client.count_emails("INBOX", ["UNSEEN"])
 
@@ -147,7 +147,7 @@ async def test_uid_match_is_bounded_to_one_new_message() -> None:
     protocol.examine.return_value = _Response("OK", [b"1"])
     protocol.uid_search.return_value = _Response("OK", [b"44"])
     client = ImapClient("imap.gmail.com")
-    client._client = protocol  # noqa: SLF001
+    client._client = protocol
 
     assert await client.uid_matches("INBOX", "44", ["FROM", '"rsa.ie"'])
     protocol.uid_search.assert_awaited_once_with(
@@ -162,7 +162,7 @@ async def test_uid_set_matching_uses_one_valid_sequence_set_search() -> None:
     protocol.examine.return_value = _Response("OK", [b"3"])
     protocol.uid_search.return_value = _Response("OK", [b"44 46 999"])
     client = ImapClient("imap.gmail.com")
-    client._client = protocol  # noqa: SLF001
+    client._client = protocol
 
     matches = await client.matching_uids(
         "INBOX", ["44", "45", "46"], ["FROM", '"rsa.ie"']
@@ -180,7 +180,7 @@ async def test_uid_set_matching_rejects_invalid_uids(uids: list[str]) -> None:
     """Only positive numeric UIDs can enter the generated IMAP sequence set."""
     protocol = AsyncMock()
     client = ImapClient("imap.gmail.com")
-    client._client = protocol  # noqa: SLF001
+    client._client = protocol
 
     with pytest.raises(ValueError, match="positive integers"):
         await client.matching_uids("INBOX", uids, ["ALL"])
@@ -194,7 +194,7 @@ async def test_empty_uid_set_performs_no_search() -> None:
     """No arrivals means no IMAP command."""
     protocol = AsyncMock()
     client = ImapClient("imap.gmail.com")
-    client._client = protocol  # noqa: SLF001
+    client._client = protocol
 
     assert await client.matching_uids("INBOX", [], ["ALL"]) == set()
     protocol.uid_search.assert_not_awaited()
@@ -205,7 +205,7 @@ async def test_folder_control_characters_are_rejected() -> None:
     """Folder input cannot inject another IMAP command."""
     protocol = AsyncMock()
     client = ImapClient("imap.gmail.com")
-    client._client = protocol  # noqa: SLF001
+    client._client = protocol
 
     with pytest.raises(ValueError, match="control characters"):
         await client.count_emails("INBOX\r\nLOGOUT", ["ALL"])
@@ -227,7 +227,7 @@ async def test_get_email_contents_uses_read_only_body_peek() -> None:
         ],
     )
     client = ImapClient("imap.gmail.com")
-    client._client = protocol  # noqa: SLF001
+    client._client = protocol
 
     result = await client.get_email_contents("INBOX", "7", body_max_chars=100)
 
@@ -248,7 +248,7 @@ async def test_folder_status_includes_uid_generation_metadata() -> None:
         "OK", [b'"INBOX" (MESSAGES 4 UNSEEN 2 UIDVALIDITY 77 UIDNEXT 101)']
     )
     client = ImapClient("imap.gmail.com")
-    client._client = protocol  # noqa: SLF001
+    client._client = protocol
 
     status = await client.get_folder_status("INBOX")
 
@@ -276,7 +276,7 @@ async def test_new_email_fetch_is_bounded_and_uid_ordered() -> None:
         for uid in range(16, 41)
     ]
     client = ImapClient("imap.gmail.com")
-    client._client = protocol  # noqa: SLF001
+    client._client = protocol
 
     messages, total = await client.get_new_emails("INBOX", 10, 25)
 
