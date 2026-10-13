@@ -23,7 +23,7 @@ def _entity() -> NewEmailEventEntity:
     )
     coordinator = SimpleNamespace(async_add_new_email_listener=Mock())
     entity = NewEmailEventEntity(coordinator, entry)
-    entity._trigger_event = Mock()  # type: ignore[method-assign]  # noqa: SLF001
+    entity._trigger_event = Mock()  # type: ignore[method-assign]
     entity.async_write_ha_state = Mock()  # type: ignore[method-assign]
     return entity
 
@@ -47,9 +47,9 @@ def test_event_entity_publishes_coordinator_payload() -> None:
         "sender_address": "sender@example.com",
     }
 
-    entity._handle_new_email(event_data)  # noqa: SLF001
+    entity._handle_new_email(event_data)
 
-    entity._trigger_event.assert_called_once_with(  # type: ignore[attr-defined]  # noqa: SLF001
+    entity._trigger_event.assert_called_once_with(  # type: ignore[attr-defined]
         EVENT_TYPE_NEW_EMAIL, event_data
     )
     entity.async_write_ha_state.assert_called_once()  # type: ignore[attr-defined]
@@ -69,7 +69,7 @@ def test_watch_rename_preserves_identity_and_emits_bounded_payload() -> None:
         entry,
         {"id": "watch-uuid", "name": "Renamed RSA", "folder": "INBOX"},
     )
-    entity._trigger_event = Mock()  # type: ignore[method-assign]  # noqa: SLF001
+    entity._trigger_event = Mock()  # type: ignore[method-assign]
     entity.async_write_ha_state = Mock()  # type: ignore[method-assign]
     payload = {
         "watch_id": "watch-uuid",
@@ -78,11 +78,11 @@ def test_watch_rename_preserves_identity_and_emits_bounded_payload() -> None:
         "subject": "Check test",
     }
 
-    entity._handle_match(payload)  # noqa: SLF001
+    entity._handle_match(payload)
 
     assert entity.unique_id == "entry-1_watch_watch-uuid"
     assert entity.name == "Renamed RSA"
-    entity._trigger_event.assert_called_once_with(  # type: ignore[attr-defined]  # noqa: SLF001
+    entity._trigger_event.assert_called_once_with(  # type: ignore[attr-defined]
         EVENT_TYPE_NEW_MATCHING_EMAIL, payload
     )
     assert "body" not in payload
