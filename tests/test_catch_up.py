@@ -17,15 +17,15 @@ from custom_components.email_ha.coordinator import (
 
 def _coordinator() -> EmailDataUpdateCoordinator:
     coordinator = object.__new__(EmailDataUpdateCoordinator)
-    coordinator._email = "user@example.com"  # noqa: SLF001
-    coordinator._folder = "INBOX"  # noqa: SLF001
-    coordinator._folder_uid_state = {}  # noqa: SLF001
-    coordinator._restored_folders = set()  # noqa: SLF001
-    coordinator._watch_uid_state = {}  # noqa: SLF001
-    coordinator._custom_last_new_match = {}  # noqa: SLF001
-    coordinator._watch_last_new_match = {}  # noqa: SLF001
-    coordinator._watch_listeners = {}  # noqa: SLF001
-    coordinator._rule_health = {}  # noqa: SLF001
+    coordinator._email = "user@example.com"
+    coordinator._folder = "INBOX"
+    coordinator._folder_uid_state = {}
+    coordinator._restored_folders = set()
+    coordinator._watch_uid_state = {}
+    coordinator._custom_last_new_match = {}
+    coordinator._watch_last_new_match = {}
+    coordinator._watch_listeners = {}
+    coordinator._rule_health = {}
     coordinator.email_watches = []
     coordinator.custom_sensors = []
     return coordinator
@@ -45,11 +45,11 @@ def _message(uid: str) -> dict:
 async def test_restored_baseline_without_opt_in_does_not_replay() -> None:
     """A restored live-only watch advances its baseline without replaying mail."""
     coordinator = _coordinator()
-    coordinator._folder_uid_state["Receipts"] = (9, 100)  # noqa: SLF001
-    coordinator._restored_folders.add("Receipts")  # noqa: SLF001
+    coordinator._folder_uid_state["Receipts"] = (9, 100)
+    coordinator._restored_folders.add("Receipts")
     client = AsyncMock()
 
-    messages = await coordinator._async_detect_folder_new_emails(  # noqa: SLF001
+    messages = await coordinator._async_detect_folder_new_emails(
         client,
         "Receipts",
         {"uidvalidity": 9, "uidnext": 104},
@@ -58,7 +58,7 @@ async def test_restored_baseline_without_opt_in_does_not_replay() -> None:
     )
 
     assert messages == []
-    assert coordinator._folder_uid_state["Receipts"] == (9, 103)  # noqa: SLF001
+    assert coordinator._folder_uid_state["Receipts"] == (9, 103)
     client.get_new_emails.assert_not_awaited()
 
 
@@ -66,12 +66,12 @@ async def test_restored_baseline_without_opt_in_does_not_replay() -> None:
 async def test_opted_in_restored_baseline_fetches_bounded_missed_mail() -> None:
     """An opted-in restored watch fetches missed mail with the catch-up limit."""
     coordinator = _coordinator()
-    coordinator._folder_uid_state["Receipts"] = (9, 100)  # noqa: SLF001
-    coordinator._restored_folders.add("Receipts")  # noqa: SLF001
+    coordinator._folder_uid_state["Receipts"] = (9, 100)
+    coordinator._restored_folders.add("Receipts")
     client = AsyncMock()
     client.get_new_emails.return_value = ([_message("101"), _message("102")], 2)
 
-    messages = await coordinator._async_detect_folder_new_emails(  # noqa: SLF001
+    messages = await coordinator._async_detect_folder_new_emails(
         client,
         "Receipts",
         {"uidvalidity": 9, "uidnext": 103},
@@ -87,11 +87,11 @@ async def test_opted_in_restored_baseline_fetches_bounded_missed_mail() -> None:
 async def test_uidvalidity_change_never_catches_up_uncertain_history() -> None:
     """A UIDVALIDITY change re-baselines instead of replaying uncertain history."""
     coordinator = _coordinator()
-    coordinator._folder_uid_state["Receipts"] = (9, 100)  # noqa: SLF001
-    coordinator._restored_folders.add("Receipts")  # noqa: SLF001
+    coordinator._folder_uid_state["Receipts"] = (9, 100)
+    coordinator._restored_folders.add("Receipts")
     client = AsyncMock()
 
-    messages = await coordinator._async_detect_folder_new_emails(  # noqa: SLF001
+    messages = await coordinator._async_detect_folder_new_emails(
         client,
         "Receipts",
         {"uidvalidity": 10, "uidnext": 8},
@@ -100,7 +100,7 @@ async def test_uidvalidity_change_never_catches_up_uncertain_history() -> None:
     )
 
     assert messages == []
-    assert coordinator._folder_uid_state["Receipts"] == (10, 7)  # noqa: SLF001
+    assert coordinator._folder_uid_state["Receipts"] == (10, 7)
     client.get_new_emails.assert_not_awaited()
 
 
@@ -131,7 +131,7 @@ async def test_restart_batch_matches_only_opted_in_watch() -> None:
     client = AsyncMock()
     client.matching_uids.return_value = {"101"}
 
-    matches = await coordinator._async_match_new_messages(  # noqa: SLF001
+    matches = await coordinator._async_match_new_messages(
         client,
         {"Receipts": [_message("101")]},
         {"Receipts"},
@@ -140,7 +140,7 @@ async def test_restart_batch_matches_only_opted_in_watch() -> None:
     assert [(watch_id, message["uid"]) for watch_id, message in matches] == [
         ("catch-up", "101")
     ]
-    assert coordinator._custom_last_new_match == {}  # noqa: SLF001
+    assert coordinator._custom_last_new_match == {}
     client.matching_uids.assert_awaited_once()
 
 
@@ -165,20 +165,20 @@ async def test_new_watch_does_not_inherit_existing_watch_catch_up_history() -> N
         "filters": {"from": "example.com"},
     }
     coordinator.email_watches = [established, new_watch]
-    coordinator._watch_uid_state["established"] = (  # noqa: SLF001
+    coordinator._watch_uid_state["established"] = (
         watch_definition_fingerprint(established),
         9,
         100,
     )
 
-    floors = coordinator._prepare_watch_uid_floors(  # noqa: SLF001
+    floors = coordinator._prepare_watch_uid_floors(
         {"Receipts": {"uidvalidity": 9, "uidnext": 104}}
     )
 
     assert floors == {"established": 100, "new": 103}
     client = AsyncMock()
     client.matching_uids.return_value = {"101", "102", "103"}
-    matches = await coordinator._async_match_new_messages(  # noqa: SLF001
+    matches = await coordinator._async_match_new_messages(
         client,
         {"Receipts": [_message("101"), _message("102"), _message("103")]},
         {"Receipts"},
@@ -208,20 +208,20 @@ def test_material_watch_edit_rebaselines_but_name_edit_keeps_floor() -> None:
         "filters": {"from": "example.com"},
     }
     coordinator.email_watches = [watch]
-    coordinator._watch_uid_state["watch"] = (  # noqa: SLF001
+    coordinator._watch_uid_state["watch"] = (
         watch_definition_fingerprint(watch),
         9,
         100,
     )
 
     watch["name"] = "Renamed only"
-    unchanged = coordinator._prepare_watch_uid_floors(  # noqa: SLF001
+    unchanged = coordinator._prepare_watch_uid_floors(
         {"Receipts": {"uidvalidity": 9, "uidnext": 104}}
     )
     assert unchanged["watch"] == 100
 
     watch["filters"] = {"subject": "receipt"}
-    changed = coordinator._prepare_watch_uid_floors(  # noqa: SLF001
+    changed = coordinator._prepare_watch_uid_floors(
         {"Receipts": {"uidvalidity": 9, "uidnext": 105}}
     )
     assert changed["watch"] == 104
@@ -247,11 +247,11 @@ async def test_legacy_state_migrates_existing_watch_from_folder_baseline() -> No
         watch_last_new_match={},
         async_schedule_save=Mock(),
     )
-    cast(Any, coordinator)._state_store = state_store  # noqa: SLF001
+    cast(Any, coordinator)._state_store = state_store
 
     await coordinator.async_load_state()
 
-    assert coordinator._watch_uid_state["watch"] == (  # noqa: SLF001
+    assert coordinator._watch_uid_state["watch"] == (
         watch_definition_fingerprint(watch),
         9,
         100,
@@ -270,8 +270,8 @@ def test_caught_up_event_is_marked_and_remains_body_free() -> None:
     caught_up = _message("101")
     caught_up["_email_ha_caught_up"] = True
 
-    coordinator._notify_watch_matches([("watch", caught_up)])  # noqa: SLF001
-    coordinator._notify_watch_matches([("watch", _message("102"))])  # noqa: SLF001
+    coordinator._notify_watch_matches([("watch", caught_up)])
+    coordinator._notify_watch_matches([("watch", _message("102"))])
 
     assert [event["caught_up"] for event in received] == [True, False]
     assert "_email_ha_caught_up" not in received[0]
@@ -293,7 +293,7 @@ async def test_disabled_catch_up_watch_still_does_no_matching_work() -> None:
     ]
     client = AsyncMock()
 
-    matches = await coordinator._async_match_new_messages(  # noqa: SLF001
+    matches = await coordinator._async_match_new_messages(
         client, {"Receipts": [_message("101")]}, {"Receipts"}
     )
 
