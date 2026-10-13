@@ -552,9 +552,7 @@ async def test_optional_folder_missing_is_local_rule_failure() -> None:
     client = AsyncMock()
     client.get_folder_status.side_effect = ImapFolderError("missing")
 
-    result = await coordinator._async_folder_status(
-        client, "Receipts", required=False
-    )
+    result = await coordinator._async_folder_status(client, "Receipts", required=False)
 
     assert result is None
 
@@ -567,9 +565,7 @@ async def test_optional_folder_transient_imap_failure_propagates() -> None:
     client.get_folder_status.side_effect = ImapClientError("connection dropped")
 
     with pytest.raises(ImapClientError):
-        await coordinator._async_folder_status(
-            client, "Receipts", required=False
-        )
+        await coordinator._async_folder_status(client, "Receipts", required=False)
 
 
 @pytest.mark.asyncio
@@ -579,9 +575,7 @@ async def test_optional_folder_validation_failure_remains_isolated() -> None:
     client = AsyncMock()
     client.get_folder_status.side_effect = ValueError("invalid folder")
 
-    result = await coordinator._async_folder_status(
-        client, "Receipts", required=False
-    )
+    result = await coordinator._async_folder_status(client, "Receipts", required=False)
 
     assert result is None
 
