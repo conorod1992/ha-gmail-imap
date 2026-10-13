@@ -46,6 +46,10 @@ class ImapSearchError(ImapClientError):
     """Raised when IMAP search criteria are rejected."""
 
 
+class ImapSearchTooBroadError(ImapSearchError):
+    """Raised when Date sorting would require an unbounded mailbox scan."""
+
+
 class ImapMessageNotFoundError(ImapClientError):
     """Raised when a folder-specific UID is not found."""
 
@@ -244,7 +248,7 @@ class ImapClient:
         # IMAP SEARCH does not guarantee Date ordering. Inspect each matching
         # header before applying the result limit; never silently rank a subset.
         if len(uids) > 250:
-            raise ImapSearchError(
+            raise ImapSearchTooBroadError(
                 "Date sorting supports at most 250 matches; narrow the search with a date filter"
             )
         candidates = [
