@@ -13,7 +13,7 @@ def _client() -> tuple[ImapClient, AsyncMock]:
     client = AsyncMock()
     client.protocol = SimpleNamespace(state="AUTH")
     client.examine.return_value = SimpleNamespace(result="OK")
-    wrapper._client = client  # noqa: SLF001
+    wrapper._client = client
     return wrapper, client
 
 
@@ -22,8 +22,8 @@ async def test_repeated_selection_of_same_folder_uses_one_examine() -> None:
     """Repeated operations in one mailbox do not re-EXAMINE it."""
     wrapper, client = _client()
 
-    await wrapper._select_read_only("INBOX")  # noqa: SLF001
-    await wrapper._select_read_only("INBOX")  # noqa: SLF001
+    await wrapper._select_read_only("INBOX")
+    await wrapper._select_read_only("INBOX")
 
     client.examine.assert_awaited_once_with("INBOX")
     assert client.protocol.state == "SELECTED"
@@ -34,8 +34,8 @@ async def test_switching_folder_performs_new_examine() -> None:
     """Changing mailboxes still selects the requested folder explicitly."""
     wrapper, client = _client()
 
-    await wrapper._select_read_only("INBOX")  # noqa: SLF001
-    await wrapper._select_read_only("Receipts")  # noqa: SLF001
+    await wrapper._select_read_only("INBOX")
+    await wrapper._select_read_only("Receipts")
 
     assert client.examine.await_args_list[0].args == ("INBOX",)
     assert client.examine.await_args_list[1].args == ("Receipts",)
@@ -52,8 +52,8 @@ async def test_failed_selection_is_not_cached() -> None:
     ]
 
     with pytest.raises(ImapFolderError):
-        await wrapper._select_read_only("Receipts")  # noqa: SLF001
-    await wrapper._select_read_only("Receipts")  # noqa: SLF001
+        await wrapper._select_read_only("Receipts")
+    await wrapper._select_read_only("Receipts")
 
     assert client.examine.await_count == 2
 
@@ -62,9 +62,9 @@ async def test_failed_selection_is_not_cached() -> None:
 async def test_disconnect_clears_selected_folder() -> None:
     """A reconnect cannot inherit mailbox state from the old IMAP session."""
     wrapper, client = _client()
-    await wrapper._select_read_only("INBOX")  # noqa: SLF001
+    await wrapper._select_read_only("INBOX")
 
     await wrapper.disconnect()
 
-    assert wrapper._selected_folder is None  # noqa: SLF001
+    assert wrapper._selected_folder is None
     client.logout.assert_awaited_once()
