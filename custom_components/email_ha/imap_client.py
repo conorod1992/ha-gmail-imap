@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 import contextlib
+from datetime import datetime, timezone
 import re
 import shlex
 import ssl
@@ -189,8 +190,9 @@ class ImapClient:
         *,
         include_body: bool = False,
         body_max_chars: int = 4000,
+        sort_by: str = "received",
     ) -> list[dict[str, Any]]:
-        """Search one folder and return newest matching messages first."""
+        """Search one folder and order by arrival or message date."""
         if not 1 <= max_results <= MAX_SEARCH_RESULTS:
             raise ValueError(f"max_results must be between 1 and {MAX_SEARCH_RESULTS}")
         if not 1 <= body_max_chars <= MAX_BODY_CHARS:
@@ -202,6 +204,7 @@ class ImapClient:
             max_results,
             include_body=include_body,
             body_max_chars=body_max_chars,
+            sort_by=sort_by,
         )
 
     async def search_emails_tokens(
@@ -212,21 +215,71 @@ class ImapClient:
         *,
         include_body: bool = False,
         body_max_chars: int = 4000,
+        sort_by: str = "received",
     ) -> list[dict[str, Any]]:
-        """Search with pre-tokenized criteria and return newest matches first."""
+        """Return matching messages ordered newest-first by arrival or Date header."""
         if not 1 <= max_results <= MAX_SEARCH_RESULTS:
             raise ValueError(f"max_results must be between 1 and {MAX_SEARCH_RESULTS}")
         if not 1 <= body_max_chars <= MAX_BODY_CHARS:
             raise ValueError(f"body_max_chars must be between 1 and {MAX_BODY_CHARS}")
-        uids = await self._search_uids(folder, validate_search_tokens(tokens))
-        return [
+        if sort_by not in ("received", "date"):
+            raise ValueError("sort_by must be received or date")
+        uids = sorted(
+            (int(uid) for uid in await self._search_uids(folder, validate_search_tokens(tokens))),
+            reverse=True,
+        )
+        if sort_by == "received":
+            selected = [str(uid) for uid in uids[:max_results]]
+            return [
+                message
+                for uid in selected
+                if (
+                    message := await self._fetch_email(
+                        uid, folder, include_body=include_body, body_max_chars=body_max_chars
+                    )
+                )
+                is not None
+            ]
+
+        # IMAP SEARCH does not guarantee Date ordering. Inspect each matching
+        # header before applying the result limit; never silently rank a subset.
+        if len(uids) > 250:
+            raise ImapSearchError(
+                "Date sorting supports at most 250 matches; narrow the search with a date filter"
+            )
+        candidates = [
             message
-            for uid in reversed(uids[-max_results:])
+            for uid in uids
             if (
                 message := await self._fetch_email(
-                    uid,
+                    str(uid), folder, include_body=False, body_max_chars=1
+                )
+            )
+            is not None
+        ]
+
+        def date_key(message: dict[str, Any]) -> tuple[float, int]:
+            try:
+                value = datetime.fromisoformat(message["date"])
+                if value.tzinfo is None:
+                    value = value.replace(tzinfo=timezone.utc)
+                timestamp = value.timestamp()
+            except (ValueError, TypeError, OverflowError, KeyError):
+                timestamp = float("-inf")
+            return timestamp, int(message["uid"])
+
+        candidates.sort(key=date_key, reverse=True)
+        selected = candidates[:max_results]
+        if not include_body:
+            return selected
+        return [
+            full
+            for item in selected
+            if (
+                full := await self._fetch_email(
+                    str(item["uid"]),
                     folder,
-                    include_body=include_body,
+                    include_body=True,
                     body_max_chars=body_max_chars,
                 )
             )
