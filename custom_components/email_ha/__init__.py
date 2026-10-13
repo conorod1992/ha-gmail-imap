@@ -55,6 +55,7 @@ from .imap_client import (
     ImapFolderError,
     ImapMessageNotFoundError,
     ImapSearchError,
+    ImapSearchTooBroadError,
     tokenize_search_criteria,
 )
 from .oauth import EmailHAOAuth2Session
@@ -279,6 +280,8 @@ async def _connect_for_call(coordinator: EmailDataUpdateCoordinator) -> ImapClie
 def _translate_imap_error(err: ImapClientError) -> HomeAssistantError:
     if isinstance(err, ImapFolderError):
         return HomeAssistantError("The selected IMAP folder is not accessible")
+    if isinstance(err, ImapSearchTooBroadError):
+        return HomeAssistantError(str(err))
     if isinstance(err, ImapSearchError):
         return HomeAssistantError("Gmail rejected the IMAP search criteria")
     if isinstance(err, ImapMessageNotFoundError):
