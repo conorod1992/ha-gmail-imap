@@ -601,9 +601,7 @@ async def test_preview_failure_keeps_draft_and_shows_clear_error(monkeypatch) ->
 
     assert result["errors"] == {"base": "filter_test_failed"}
     assert flow._custom_draft["name"] == "Retained"
-    assert flow._custom_draft["filters"] == {
-        "from": "sender.example"
-    }
+    assert flow._custom_draft["filters"] == {"from": "sender.example"}
     flow.async_create_entry.assert_not_called()
 
 
