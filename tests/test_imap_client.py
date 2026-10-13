@@ -8,7 +8,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from custom_components.email_ha.imap_client import ImapClient, tokenize_search_criteria
+from custom_components.email_ha.imap_client import (
+    ImapClient,
+    ImapSearchError,
+    tokenize_search_criteria,
+)
 
 
 @dataclass
@@ -285,3 +289,55 @@ async def test_new_email_fetch_is_bounded_and_uid_ordered() -> None:
         str(uid) for uid in range(16, 41)
     ]
     protocol.uid_search.assert_awaited_once_with("UID", "11:*", charset=None)
+
+
+@pytest.mark.asyncio
+async def test_search_orders_unsorted_uids_numerically_before_limiting() -> None:
+    """Search responses need not be in UID order or lexicographic order."""
+    client = ImapClient("imap.gmail.com")
+    client._search_uids = AsyncMock(return_value=["9", "100", "20", "7"])
+    client._fetch_email = AsyncMock(side_effect=lambda uid, *args, **kwargs: {"uid": uid})
+
+    result = await client.search_emails_tokens("INBOX", ["ALL"], max_results=2)
+
+    assert [item["uid"] for item in result] == ["100", "20"]
+    assert client._fetch_email.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_date_sort_ranks_all_matches_before_limiting() -> None:
+    """An older UID can contain the newest email Date header."""
+    client = ImapClient("imap.gmail.com")
+    client._search_uids = AsyncMock(return_value=["20", "3", "10"])
+    dates = {
+        "20": "2026-01-01T00:00:00+00:00",
+        "3": "2026-10-13T20:00:00+00:00",
+        "10": "2026-06-01T00:00:00+00:00",
+    }
+    client._fetch_email = AsyncMock(
+        side_effect=lambda uid, *args, **kwargs: {
+            "uid": uid,
+            "date": dates[uid],
+            "plain_text_body": "body" if kwargs["include_body"] else "",
+        }
+    )
+
+    result = await client.search_emails_tokens(
+        "INBOX", ["ALL"], max_results=2, sort_by="date", include_body=True
+    )
+
+    assert [item["uid"] for item in result] == ["3", "10"]
+    assert client._fetch_email.await_count == 5
+
+
+@pytest.mark.asyncio
+async def test_date_sort_refuses_to_rank_only_a_subset() -> None:
+    """A large match set must not return a deceptively incomplete top 10."""
+    client = ImapClient("imap.gmail.com")
+    client._search_uids = AsyncMock(return_value=[str(uid) for uid in range(1, 252)])
+    client._fetch_email = AsyncMock()
+
+    with pytest.raises(ImapSearchError, match="250 matches"):
+        await client.search_emails_tokens("INBOX", ["ALL"], sort_by="date")
+
+    client._fetch_email.assert_not_awaited()
