@@ -83,10 +83,10 @@ async def test_diagnostics_redact_credentials_and_private_filters(monkeypatch) -
 def test_completed_idle_task_is_not_running() -> None:
     """Diagnostics distinguish a finished task object from a live IDLE loop."""
     coordinator = object.__new__(EmailDataUpdateCoordinator)
-    coordinator._idle_task = Mock()  # noqa: SLF001
-    coordinator._idle_task.done.return_value = True  # noqa: SLF001
+    coordinator._idle_task = Mock()
+    coordinator._idle_task.done.return_value = True
 
     assert coordinator.idle_running is False
 
-    coordinator._idle_task.done.return_value = False  # noqa: SLF001
+    coordinator._idle_task.done.return_value = False
     assert coordinator.idle_running is True
