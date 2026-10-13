@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 import contextlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 import re
 import shlex
 import ssl
@@ -266,7 +266,7 @@ class ImapClient:
             try:
                 value = datetime.fromisoformat(message["date"])
                 if value.tzinfo is None:
-                    value = value.replace(tzinfo=timezone.utc)
+                    value = value.replace(tzinfo=UTC)
                 timestamp = value.timestamp()
             except (ValueError, TypeError, OverflowError, KeyError):
                 timestamp = float("-inf")
