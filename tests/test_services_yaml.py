@@ -32,7 +32,8 @@ def test_only_three_actions_are_documented() -> None:
         "search_emails",
         "get_email_contents",
     }
-    assert all(action["target"] == {} for action in services.values())
+    # Mailbox actions use config_entry_id, not Home Assistant entity targets.
+    assert all("target" not in action for action in services.values())
 
 
 def test_find_email_fields_have_descriptions_and_safe_selectors() -> None:

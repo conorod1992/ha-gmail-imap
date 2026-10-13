@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -93,7 +93,7 @@ class _BaseEmailSensor(CoordinatorEntity[EmailDataUpdateCoordinator], SensorEnti
         if self.coordinator.data is None or self.coordinator.last_success_time is None:
             return False
         elapsed = (
-            datetime.now(timezone.utc) - self.coordinator.last_success_time
+            datetime.now(UTC) - self.coordinator.last_success_time
         ).total_seconds()
         return elapsed <= UNAVAILABLE_AFTER_SECONDS
 
@@ -238,7 +238,7 @@ class ConnectionStatusSensor(_BaseEmailSensor):
         timestamp = self.coordinator.last_success_time
         fresh = (
             timestamp is not None
-            and (datetime.now(timezone.utc) - timestamp).total_seconds()
+            and (datetime.now(UTC) - timestamp).total_seconds()
             <= UNAVAILABLE_AFTER_SECONDS
         )
         return "Healthy" if self.coordinator.last_update_success and fresh else "Stale"

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -44,7 +44,7 @@ async def test_diagnostics_redact_credentials_and_private_filters(monkeypatch) -
     )
     coordinator = SimpleNamespace(
         enabled_gmail_entities={"primary_unread"},
-        last_success_time=datetime(2026, 8, 26, tzinfo=timezone.utc),
+        last_success_time=datetime(2026, 8, 26, tzinfo=UTC),
         idle_running=False,
         cached_folder_count=3,
         last_update_success=False,
@@ -83,10 +83,10 @@ async def test_diagnostics_redact_credentials_and_private_filters(monkeypatch) -
 def test_completed_idle_task_is_not_running() -> None:
     """Diagnostics distinguish a finished task object from a live IDLE loop."""
     coordinator = object.__new__(EmailDataUpdateCoordinator)
-    coordinator._idle_task = Mock()  # noqa: SLF001
-    coordinator._idle_task.done.return_value = True  # noqa: SLF001
+    coordinator._idle_task = Mock()
+    coordinator._idle_task.done.return_value = True
 
     assert coordinator.idle_running is False
 
-    coordinator._idle_task.done.return_value = False  # noqa: SLF001
+    coordinator._idle_task.done.return_value = False
     assert coordinator.idle_running is True

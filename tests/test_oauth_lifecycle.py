@@ -156,21 +156,21 @@ async def test_coordinator_preserves_transient_oauth_exception() -> None:
     )
 
     with pytest.raises(ConfigEntryNotReady):
-        await coordinator._async_ensure_fresh_token()  # noqa: SLF001
+        await coordinator._async_ensure_fresh_token()
 
 
 @pytest.mark.asyncio
 async def test_idle_retries_transient_oauth_failure(monkeypatch) -> None:
     """IDLE reconnects after a temporary token endpoint failure."""
     coordinator = object.__new__(EmailDataUpdateCoordinator)
-    coordinator._email = "user@example.com"  # noqa: SLF001
-    coordinator._async_run_idle_session = AsyncMock(  # type: ignore[method-assign]  # noqa: SLF001
+    coordinator._email = "user@example.com"
+    coordinator._async_run_idle_session = AsyncMock(  # type: ignore[method-assign]
         side_effect=ConfigEntryNotReady("temporary OAuth failure")
     )
     sleep = AsyncMock()
     monkeypatch.setattr("custom_components.email_ha.coordinator.asyncio.sleep", sleep)
 
-    attempt = await coordinator._async_idle_attempt(0)  # noqa: SLF001
+    attempt = await coordinator._async_idle_attempt(0)
 
     assert attempt == 1
     sleep.assert_awaited_once_with(5)

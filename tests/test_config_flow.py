@@ -52,14 +52,14 @@ async def test_account_input_is_normalized_and_duplicate_checked() -> None:
     """Each Gmail address becomes an account-scoped unique config entry."""
     flow = OAuth2FlowHandler()
     flow.async_set_unique_id = AsyncMock()
-    flow._abort_if_unique_id_configured = Mock()  # noqa: SLF001
+    flow._abort_if_unique_id_configured = Mock()
     flow.async_step_pick_implementation = AsyncMock(return_value={"type": "external"})
 
     result = await flow.async_step_user({CONF_EMAIL: " User@Example.COM "})
 
     assert result == {"type": "external"}
     flow.async_set_unique_id.assert_awaited_once_with("user@example.com")
-    flow._abort_if_unique_id_configured.assert_called_once()  # noqa: SLF001
+    flow._abort_if_unique_id_configured.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -75,7 +75,7 @@ async def test_oauth_continues_to_recommended_sensor_selection() -> None:
     result = await flow.async_oauth_create_entry(token_data)
 
     assert cast(dict[str, Any], result)["step_id"] == "sensors"
-    assert flow._token_data == token_data  # noqa: SLF001
+    assert flow._token_data == token_data
 
 
 @pytest.mark.asyncio
@@ -84,7 +84,7 @@ async def test_reauthentication_updates_token_without_replaying_setup() -> None:
     flow = OAuth2FlowHandler()
     flow.context = {"source": SOURCE_REAUTH}
     entry = SimpleNamespace(entry_id="entry-1")
-    flow._get_reauth_entry = Mock(return_value=entry)  # noqa: SLF001
+    flow._get_reauth_entry = Mock(return_value=entry)
     flow.async_update_reload_and_abort = Mock(return_value={"type": "abort"})
     token_data = {"token": {"access_token": "renewed"}}
 
@@ -100,8 +100,8 @@ async def test_reauthentication_updates_token_without_replaying_setup() -> None:
 async def test_sensor_selection_creates_clean_options() -> None:
     """Initial entity state is stored as options, not IMAP setup fields."""
     flow = OAuth2FlowHandler()
-    flow._email = "user@example.com"  # noqa: SLF001
-    flow._token_data = {"token": {"access_token": "secret"}}  # noqa: SLF001
+    flow._email = "user@example.com"
+    flow._token_data = {"token": {"access_token": "secret"}}
     flow.async_create_entry = Mock(return_value={"type": "create_entry"})
 
     await flow.async_step_sensors(
@@ -131,7 +131,7 @@ async def test_delete_removes_custom_entity_registry_entry(monkeypatch) -> None:
     flow = EmailHAOptionsFlow()
     flow.hass = SimpleNamespace(config_entries=config_entries)
     flow.handler = "entry-1"
-    flow._custom_id = "custom-1"  # noqa: SLF001
+    flow._custom_id = "custom-1"
     flow.async_create_entry = Mock(return_value={"type": "create_entry"})
     registry = Mock()
     registry.async_get_entity_id.return_value = "sensor.gmail_bookings"
@@ -158,7 +158,7 @@ async def test_delete_email_watch_removes_event_registry_entry(monkeypatch) -> N
         config_entries=SimpleNamespace(async_get_known_entry=Mock(return_value=entry))
     )
     flow.handler = "entry-1"
-    flow._watch_id = "watch-1"  # noqa: SLF001
+    flow._watch_id = "watch-1"
     flow.async_create_entry = Mock(return_value={"type": "create_entry"})
     registry = Mock()
     registry.async_get_entity_id.return_value = "event.gmail_rsa"
@@ -192,29 +192,29 @@ def test_watch_edit_keeps_id_and_duplicate_gets_new_id(monkeypatch) -> None:
     )
     flow.handler = "entry-1"
     flow.async_create_entry = Mock(return_value={"type": "create_entry"})
-    flow._watch_mode = "edit"  # noqa: SLF001
-    flow._watch_id = "watch-1"  # noqa: SLF001
-    flow._watch_draft = {  # noqa: SLF001
+    flow._watch_mode = "edit"
+    flow._watch_id = "watch-1"
+    flow._watch_draft = {
         "id": "watch-1",
         "name": "Renamed RSA",
         "folder": "INBOX",
         "filters": {},
     }
 
-    flow._finish_email_watch()  # noqa: SLF001
+    flow._finish_email_watch()
 
     edited = flow.async_create_entry.call_args.kwargs["data"]["email_watches"]
     assert edited[0]["id"] == "watch-1"
     assert edited[0]["name"] == "Renamed RSA"
 
     entry.options = {"email_watches": edited}
-    flow._watch_mode = "duplicate"  # noqa: SLF001
-    flow._watch_draft = {**edited[0], "name": "Copy of Renamed RSA"}  # noqa: SLF001
+    flow._watch_mode = "duplicate"
+    flow._watch_draft = {**edited[0], "name": "Copy of Renamed RSA"}
     monkeypatch.setattr(
         "custom_components.email_ha.config_flow.uuid4",
         Mock(return_value=SimpleNamespace(hex="watch-2")),
     )
-    flow._finish_email_watch()  # noqa: SLF001
+    flow._finish_email_watch()
 
     duplicated = flow.async_create_entry.call_args.kwargs["data"]["email_watches"]
     assert [watch["id"] for watch in duplicated] == ["watch-1", "watch-2"]
@@ -255,7 +255,7 @@ def test_gmail_sensor_state_reconciles_entity_registry(monkeypatch) -> None:
         Mock(return_value=entries),
     )
 
-    flow._reconcile_entity_registry({"primary_unread"})  # noqa: SLF001
+    flow._reconcile_entity_registry({"primary_unread"})
 
     assert registry.async_update_entity.call_args_list == [
         call("sensor.primary", disabled_by=None),
@@ -417,7 +417,7 @@ async def test_logical_watch_selection_leads_to_small_action_flow() -> None:
     )
 
     assert result["step_id"] == "email_watch_action"
-    assert flow._watch_id == "watch-1"  # noqa: SLF001
+    assert flow._watch_id == "watch-1"
     action_schema = result["data_schema"]
     assert action_schema({"action": "disable"})["action"] == "disable"
 
@@ -444,7 +444,7 @@ async def test_logical_sensor_selection_leads_to_small_action_flow() -> None:
     )
 
     assert result["step_id"] == "custom_sensor_action"
-    assert flow._custom_id == "sensor-1"  # noqa: SLF001
+    assert flow._custom_id == "sensor-1"
     action_schema = result["data_schema"]
     assert action_schema({"action": "duplicate"})["action"] == "duplicate"
 
@@ -497,7 +497,7 @@ async def test_common_preview_is_bounded_body_free_and_does_not_persist(
         "custom_components.email_ha.config_flow.coordinator_from_entry",
         Mock(return_value=coordinator),
     )
-    flow._custom_mode = "add"  # noqa: SLF001
+    flow._custom_mode = "add"
 
     result = cast(
         dict[str, Any],
@@ -541,7 +541,7 @@ async def test_zero_match_preview_is_successful_and_preserves_baseline(
         "custom_components.email_ha.config_flow.coordinator_from_entry",
         Mock(return_value=coordinator),
     )
-    flow._watch_mode = "add"  # noqa: SLF001
+    flow._watch_mode = "add"
 
     result = cast(
         dict[str, Any],
@@ -563,8 +563,8 @@ async def test_zero_match_preview_is_successful_and_preserves_baseline(
     )
 
     assert "No matching emails" in result["description_placeholders"]["preview"]
-    assert coordinator._last_seen_uid == 42  # noqa: SLF001
-    assert coordinator._folder_uid_state == {"INBOX": (7, 42)}  # noqa: SLF001
+    assert coordinator._last_seen_uid == 42
+    assert coordinator._folder_uid_state == {"INBOX": (7, 42)}
     flow.async_create_entry.assert_not_called()
 
 
@@ -579,7 +579,7 @@ async def test_preview_failure_keeps_draft_and_shows_clear_error(monkeypatch) ->
         "custom_components.email_ha.config_flow.coordinator_from_entry",
         Mock(return_value=coordinator),
     )
-    flow._custom_mode = "add"  # noqa: SLF001
+    flow._custom_mode = "add"
 
     result = cast(
         dict[str, Any],
@@ -600,10 +600,8 @@ async def test_preview_failure_keeps_draft_and_shows_clear_error(monkeypatch) ->
     )
 
     assert result["errors"] == {"base": "filter_test_failed"}
-    assert flow._custom_draft["name"] == "Retained"  # noqa: SLF001
-    assert flow._custom_draft["filters"] == {  # noqa: SLF001
-        "from": "sender.example"
-    }
+    assert flow._custom_draft["name"] == "Retained"
+    assert flow._custom_draft["filters"] == {"from": "sender.example"}
     flow.async_create_entry.assert_not_called()
 
 
@@ -622,9 +620,9 @@ async def test_edit_preview_save_retains_persistent_id(monkeypatch) -> None:
         "custom_components.email_ha.config_flow.coordinator_from_entry",
         Mock(return_value=coordinator),
     )
-    flow._watch_mode = "edit"  # noqa: SLF001
-    flow._watch_id = "watch-1"  # noqa: SLF001
-    flow._watch_draft = dict(original)  # noqa: SLF001
+    flow._watch_mode = "edit"
+    flow._watch_id = "watch-1"
+    flow._watch_draft = dict(original)
 
     await flow.async_step_email_watch_preview()
     await flow.async_step_email_watch_preview({"save": True})
@@ -638,7 +636,7 @@ async def test_edit_preview_save_retains_persistent_id(monkeypatch) -> None:
 async def test_advanced_preview_uses_complete_retained_draft() -> None:
     """Advanced fields are captured before preview and survive returning to edit."""
     flow, _entry = _options_flow({"custom_sensors": []})
-    flow._custom_mode = "add"  # noqa: SLF001
+    flow._custom_mode = "add"
     flow.async_step_custom_sensor_advanced = AsyncMock(
         return_value={"type": "form", "step_id": "custom_sensor_advanced"}
     )
@@ -673,7 +671,7 @@ async def test_advanced_preview_uses_complete_retained_draft() -> None:
     )
 
     assert preview["step_id"] == "custom_sensor_preview"
-    assert flow._custom_draft["filters"] == {  # noqa: SLF001
+    assert flow._custom_draft["filters"] == {
         "from": "rsa.ie",
         "body": "renewal",
         "since": "2026-01-01",

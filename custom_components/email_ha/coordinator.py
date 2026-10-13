@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 import logging
@@ -303,7 +303,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         previous = self._rule_health.get(rule_id, RuleHealthData())
         self._rule_health[rule_id] = RuleHealthData(
             status="Healthy",
-            last_successful_check=checked_at or datetime.now(timezone.utc).isoformat(),
+            last_successful_check=checked_at or datetime.now(UTC).isoformat(),
             last_error_at=previous.last_error_at,
             last_error_type=previous.last_error_type,
             last_error=previous.last_error,
@@ -317,7 +317,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         self._rule_health[rule_id] = RuleHealthData(
             status="Error",
             last_successful_check=previous.last_successful_check,
-            last_error_at=datetime.now(timezone.utc).isoformat(),
+            last_error_at=datetime.now(UTC).isoformat(),
             last_error_type=type(err).__name__,
             last_error=message,
         )
@@ -330,7 +330,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         self._rule_health[rule_id] = RuleHealthData(
             status="Error",
             last_successful_check=previous.last_successful_check,
-            last_error_at=datetime.now(timezone.utc).isoformat(),
+            last_error_at=datetime.now(UTC).isoformat(),
             last_error_type="FolderQueryError",
             last_error="Configured folder could not be queried",
         )
@@ -541,7 +541,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
         """Match bounded arrivals, restricting restart batches to eligible watches."""
         catch_up_only_folders = catch_up_only_folders or set()
         watch_matches: list[tuple[str, dict[str, Any]]] = []
-        observed_at = datetime.now(timezone.utc).isoformat()
+        observed_at = datetime.now(UTC).isoformat()
         if not hasattr(self, "_watch_last_new_match"):
             self._watch_last_new_match = {}
         for definition, is_watch in (
@@ -721,7 +721,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
 
         watch_uid_floors = self._prepare_watch_uid_floors(folder_statuses)
 
-        checked_at = datetime.now(timezone.utc).isoformat()
+        checked_at = datetime.now(UTC).isoformat()
         for watch in self.email_watches:
             watch_id = str(watch.get("id", ""))
             if not watch_id:
@@ -802,7 +802,7 @@ class EmailDataUpdateCoordinator(DataUpdateCoordinator[EmailData]):
                     self._custom_last_new_match.get(sensor_id),
                 )
 
-        self.last_success_time = datetime.now(timezone.utc)
+        self.last_success_time = datetime.now(UTC)
         self._schedule_state_save()
         return EmailData(
             emails=emails,

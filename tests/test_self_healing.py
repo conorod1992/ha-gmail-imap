@@ -19,16 +19,16 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 
 def _coordinator() -> EmailDataUpdateCoordinator:
     coordinator = object.__new__(EmailDataUpdateCoordinator)
-    coordinator._email = "user@example.com"  # noqa: SLF001
-    coordinator._folder = "INBOX"  # noqa: SLF001
+    coordinator._email = "user@example.com"
+    coordinator._folder = "INBOX"
     coordinator.custom_sensors = []
     coordinator.email_watches = []
-    coordinator._folder_uid_state = {}  # noqa: SLF001
-    coordinator._restored_folders = set()  # noqa: SLF001
-    coordinator._watch_uid_state = {}  # noqa: SLF001
-    coordinator._custom_last_new_match = {}  # noqa: SLF001
-    coordinator._watch_last_new_match = {}  # noqa: SLF001
-    coordinator._idle_task = None  # noqa: SLF001
+    coordinator._folder_uid_state = {}
+    coordinator._restored_folders = set()
+    coordinator._watch_uid_state = {}
+    coordinator._custom_last_new_match = {}
+    coordinator._watch_last_new_match = {}
+    coordinator._idle_task = None
     return coordinator
 
 
@@ -61,28 +61,24 @@ async def test_load_state_prunes_deleted_rules_and_folders() -> None:
         },
         async_schedule_save=Mock(),
     )
-    coordinator._state_store = cast(Any, state_store)  # noqa: SLF001
+    coordinator._state_store = cast(Any, state_store)
 
     await coordinator.async_load_state()
 
-    assert coordinator._folder_uid_state == {  # noqa: SLF001
+    assert coordinator._folder_uid_state == {
         "INBOX": (1, 10),
         "Receipts": (2, 20),
         "Archive": (3, 30),
     }
-    assert set(coordinator._restored_folders) == {  # noqa: SLF001
+    assert set(coordinator._restored_folders) == {
         "INBOX",
         "Receipts",
         "Archive",
     }
-    assert coordinator._watch_uid_state == {"watch": ("keep", 3, 30)}  # noqa: SLF001
-    assert coordinator._custom_last_new_match == {  # noqa: SLF001
-        "sensor": "2026-09-01T00:00:00+00:00"
-    }
-    assert coordinator._watch_last_new_match == {  # noqa: SLF001
-        "watch": "2026-09-01T00:00:00+00:00"
-    }
-    assert state_store.folder_uid_state == coordinator._folder_uid_state  # noqa: SLF001
+    assert coordinator._watch_uid_state == {"watch": ("keep", 3, 30)}
+    assert coordinator._custom_last_new_match == {"sensor": "2026-09-01T00:00:00+00:00"}
+    assert coordinator._watch_last_new_match == {"watch": "2026-09-01T00:00:00+00:00"}
+    assert state_store.folder_uid_state == coordinator._folder_uid_state
     state_store.async_schedule_save.assert_called_once()
 
 
@@ -90,7 +86,7 @@ async def test_load_state_prunes_deleted_rules_and_folders() -> None:
 async def test_state_store_repeated_load_does_not_keep_removed_values() -> None:
     """A second load starts clean instead of retaining values from the first load."""
     state_store = object.__new__(EmailStateStore)
-    state_store._store = cast(  # noqa: SLF001
+    state_store._store = cast(
         Any,
         SimpleNamespace(
             async_load=AsyncMock(
@@ -131,7 +127,7 @@ async def test_start_idle_replaces_a_finished_task(caplog) -> None:
     coordinator = _coordinator()
     finished = asyncio.create_task(asyncio.sleep(0))
     await finished
-    coordinator._idle_task = finished  # noqa: SLF001
+    coordinator._idle_task = finished
     replacement = asyncio.get_running_loop().create_future()
 
     def create_background_task(
@@ -151,7 +147,7 @@ async def test_start_idle_replaces_a_finished_task(caplog) -> None:
     with caplog.at_level("WARNING"):
         coordinator.start_idle()
 
-    assert coordinator._idle_task is replacement  # noqa: SLF001
+    assert coordinator._idle_task is replacement
     assert "stopped unexpectedly; restarting" in caplog.text
     replacement.cancel()
 
@@ -167,11 +163,11 @@ async def test_stop_idle_does_not_rethrow_an_old_task_failure() -> None:
     failed = asyncio.create_task(fail())
     await asyncio.sleep(0)
     assert failed.done()
-    coordinator._idle_task = failed  # noqa: SLF001
+    coordinator._idle_task = failed
 
     await coordinator.stop_idle()
 
-    assert coordinator._idle_task is None  # noqa: SLF001
+    assert coordinator._idle_task is None
 
 
 @pytest.mark.asyncio
@@ -181,12 +177,12 @@ async def test_unexpected_idle_error_uses_bounded_reconnect_backoff(
     """Unexpected runtime failures are logged and retried instead of killing IDLE."""
     coordinator = _coordinator()
     run_session = AsyncMock(side_effect=RuntimeError("boom"))
-    cast(Any, coordinator)._async_run_idle_session = run_session  # noqa: SLF001
+    cast(Any, coordinator)._async_run_idle_session = run_session
     sleep = AsyncMock()
     monkeypatch.setattr("custom_components.email_ha.coordinator.asyncio.sleep", sleep)
 
     with caplog.at_level("ERROR"):
-        reconnect_attempt = await coordinator._async_idle_attempt(0)  # noqa: SLF001
+        reconnect_attempt = await coordinator._async_idle_attempt(0)
 
     assert reconnect_attempt == 1
     sleep.assert_awaited_once_with(IDLE_RECONNECT_DELAYS[0])
@@ -197,9 +193,9 @@ async def test_unexpected_idle_error_uses_bounded_reconnect_backoff(
 async def test_idle_auth_failure_remains_terminal() -> None:
     """Self-healing must not turn a genuine reauth requirement into a retry loop."""
     coordinator = _coordinator()
-    cast(Any, coordinator)._async_run_idle_session = AsyncMock(  # noqa: SLF001
+    cast(Any, coordinator)._async_run_idle_session = AsyncMock(
         side_effect=ConfigEntryAuthFailed("reauth")
     )
 
     with pytest.raises(ConfigEntryAuthFailed):
-        await coordinator._async_idle_attempt(0)  # noqa: SLF001
+        await coordinator._async_idle_attempt(0)

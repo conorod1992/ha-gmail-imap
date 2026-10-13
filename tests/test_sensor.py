@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -34,7 +34,7 @@ def _coordinator(data: EmailData, health: RuleHealthData | None = None):
     return SimpleNamespace(
         data=data,
         folder="INBOX",
-        last_success_time=datetime.now(timezone.utc),
+        last_success_time=datetime.now(UTC),
         last_update_success=True,
         rule_health=lambda _rule_id: health or RuleHealthData(),
     )
@@ -42,7 +42,7 @@ def _coordinator(data: EmailData, health: RuleHealthData | None = None):
 
 def test_health_sensors_remain_available_and_use_freshness() -> None:
     """Diagnostics stay visible while accurately reporting a stale account."""
-    recent = datetime.now(timezone.utc)
+    recent = datetime.now(UTC)
     coordinator = _coordinator(EmailData())
     coordinator.last_success_time = recent
     status = ConnectionStatusSensor(coordinator, _entry())
@@ -64,7 +64,7 @@ def test_health_sensors_remain_available_and_use_freshness() -> None:
     coordinator.last_update_success = True
     assert status.native_value == "Healthy"
 
-    coordinator.last_success_time = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    coordinator.last_success_time = datetime(2020, 1, 1, tzinfo=UTC)
     assert status.available is True
     assert status.native_value == "Stale"
     historical = timestamp.native_value

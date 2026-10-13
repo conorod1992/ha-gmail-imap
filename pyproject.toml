@@ -587,7 +587,7 @@ split-on-trailing-comma = false
 
 # Temporary
 "homeassistant/**" = ["PTH"]
-"tests/**" = ["PTH"]
+"tests/**" = ["PTH", "SLF001"]
 
 # Custom component: _attr_-based sensor overrides are self-documenting via class docstrings
 "custom_components/**" = ["D102", "D107"]

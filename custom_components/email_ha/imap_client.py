@@ -392,7 +392,7 @@ class ImapClient:
         idle = await client.idle_start(timeout=timeout)
         try:
             push = cast(list[bytes], await client.wait_server_push())
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return None
         else:
             if push is STOP_WAIT_SERVER_PUSH or not push:

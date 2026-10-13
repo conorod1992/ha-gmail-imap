@@ -15,9 +15,7 @@ if "custom_components" not in sys.modules:
     custom_components.__path__ = [str(_CUSTOM_COMPONENTS)]
     sys.modules["custom_components"] = custom_components
 
-from custom_components.email_ha.coordinator import (  # noqa: E402
-    EmailDataUpdateCoordinator,
-)
+from custom_components.email_ha.coordinator import EmailDataUpdateCoordinator  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

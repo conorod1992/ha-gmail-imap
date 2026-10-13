@@ -51,4 +51,4 @@ async def test_connect_creates_ssl_context_off_event_loop() -> None:
         timeout=IMAP_TIMEOUT,
         ssl_context=ssl_context,
     )
-    assert client._client is protocol  # noqa: SLF001
+    assert client._client is protocol
