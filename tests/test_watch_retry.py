@@ -65,9 +65,7 @@ async def test_watch_match_failure_retries_unacknowledged_arrival() -> None:
         status,
         fetch_messages=True,
     )
-    first_floors = coordinator._prepare_watch_uid_floors(
-        {"Receipts": status}
-    )
+    first_floors = coordinator._prepare_watch_uid_floors({"Receipts": status})
 
     assert first_floors == {"watch": 100}
     assert coordinator._watch_uid_state["watch"] == (fingerprint, 9, 100)
@@ -91,9 +89,7 @@ async def test_watch_match_failure_retries_unacknowledged_arrival() -> None:
         status,
         fetch_messages=True,
     )
-    retry_floors = coordinator._prepare_watch_uid_floors(
-        {"Receipts": status}
-    )
+    retry_floors = coordinator._prepare_watch_uid_floors({"Receipts": status})
     matches = await coordinator._async_match_new_messages(
         client,
         {"Receipts": retry_arrivals},
