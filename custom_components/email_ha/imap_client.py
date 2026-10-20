@@ -229,7 +229,12 @@ class ImapClient:
         if sort_by not in ("received", "date"):
             raise ValueError("sort_by must be received or date")
         uids = sorted(
-            (int(uid) for uid in await self._search_uids(folder, validate_search_tokens(tokens))),
+            (
+                int(uid)
+                for uid in await self._search_uids(
+                    folder, validate_search_tokens(tokens)
+                )
+            ),
             reverse=True,
         )
         if sort_by == "received":
@@ -239,7 +244,10 @@ class ImapClient:
                 for uid in selected
                 if (
                     message := await self._fetch_email(
-                        uid, folder, include_body=include_body, body_max_chars=body_max_chars
+                        uid,
+                        folder,
+                        include_body=include_body,
+                        body_max_chars=body_max_chars,
                     )
                 )
                 is not None
