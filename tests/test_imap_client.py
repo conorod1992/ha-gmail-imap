@@ -296,7 +296,9 @@ async def test_search_orders_unsorted_uids_numerically_before_limiting() -> None
     """Search responses need not be in UID order or lexicographic order."""
     client = ImapClient("imap.gmail.com")
     client._search_uids = AsyncMock(return_value=["9", "100", "20", "7"])
-    client._fetch_email = AsyncMock(side_effect=lambda uid, *args, **kwargs: {"uid": uid})
+    client._fetch_email = AsyncMock(
+        side_effect=lambda uid, *args, **kwargs: {"uid": uid}
+    )
 
     result = await client.search_emails_tokens("INBOX", ["ALL"], max_results=2)
 
