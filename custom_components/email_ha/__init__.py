@@ -55,6 +55,7 @@ from .imap_client import (
     ImapFolderError,
     ImapMessageNotFoundError,
     ImapSearchError,
+    ImapSearchTooBroadError,
     tokenize_search_criteria,
 )
 from .oauth import EmailHAOAuth2Session
@@ -83,6 +84,7 @@ SEARCH_EMAILS_SCHEMA = vol.Schema(
             cv.string, validate_imap_folder
         ),
         vol.Optional(SERVICE_ATTR_SEARCH_CRITERIA, default="ALL"): cv.string,
+        vol.Optional("sort_by", default="received"): vol.In(("received", "date")),
         vol.Optional(SERVICE_ATTR_MAX_RESULTS, default=DEFAULT_SEARCH_RESULTS): vol.All(
             vol.Coerce(int), vol.Range(min=1, max=MAX_SEARCH_RESULTS)
         ),
@@ -99,6 +101,7 @@ FIND_EMAILS_SCHEMA = vol.Schema(
             cv.string, validate_imap_folder
         ),
         vol.Optional("match_mode", default="all"): vol.In(MATCH_MODES),
+        vol.Optional("sort_by", default="received"): vol.In(("received", "date")),
         vol.Optional("from"): cv.string,
         vol.Optional("to"): cv.string,
         vol.Optional("cc"): cv.string,
@@ -277,6 +280,8 @@ async def _connect_for_call(coordinator: EmailDataUpdateCoordinator) -> ImapClie
 def _translate_imap_error(err: ImapClientError) -> HomeAssistantError:
     if isinstance(err, ImapFolderError):
         return HomeAssistantError("The selected IMAP folder is not accessible")
+    if isinstance(err, ImapSearchTooBroadError):
+        return HomeAssistantError(str(err))
     if isinstance(err, ImapSearchError):
         return HomeAssistantError("Gmail rejected the IMAP search criteria")
     if isinstance(err, ImapMessageNotFoundError):
@@ -294,6 +299,7 @@ async def _search_raw(
     max_results: int,
     include_body: bool,
     body_max_chars: int,
+    sort_by: str = "received",
 ) -> list[dict[str, Any]]:
     try:
         tokenize_search_criteria(criteria)
@@ -308,6 +314,7 @@ async def _search_raw(
                 max_results,
                 include_body=include_body,
                 body_max_chars=body_max_chars,
+                sort_by=sort_by,
             )
     except ImapClientError as err:
         raise _translate_imap_error(err) from err
@@ -321,6 +328,7 @@ async def _search_structured(
     max_results: int,
     include_body: bool,
     body_max_chars: int,
+    sort_by: str = "received",
 ) -> list[dict[str, Any]]:
     client = await _connect_for_call(coordinator)
     try:
@@ -331,6 +339,7 @@ async def _search_structured(
                 max_results,
                 include_body=include_body,
                 body_max_chars=body_max_chars,
+                sort_by=sort_by,
             )
     except ImapClientError as err:
         raise _translate_imap_error(err) from err
@@ -369,6 +378,7 @@ def _register_services(hass: HomeAssistant) -> None:
             max_results=call.data[SERVICE_ATTR_MAX_RESULTS],
             include_body=call.data["include_body"],
             body_max_chars=call.data["body_max_chars"],
+            sort_by=call.data["sort_by"],
         )
         metadata = _search_response_metadata(
             emails,
@@ -397,6 +407,7 @@ def _register_services(hass: HomeAssistant) -> None:
             max_results=call.data[SERVICE_ATTR_MAX_RESULTS],
             include_body=call.data["include_body"],
             body_max_chars=call.data["body_max_chars"],
+            sort_by=call.data["sort_by"],
         )
         metadata = _search_response_metadata(
             emails,

@@ -11,6 +11,19 @@ find_emails:
       selector:
         config_entry:
           integration: email_ha
+    sort_by:
+      name: Sort by
+      description: >
+        Newest received uses mailbox arrival order. Newest email date uses the
+        message Date header (up to 250 matches; narrow broader searches).
+      default: received
+      selector:
+        select:
+          options:
+            - label: Newest received
+              value: received
+            - label: Newest email date
+              value: date
     folder:
       name: Folder
       description: Defaults to Inbox. Advanced users may enter another IMAP folder.
@@ -220,6 +233,19 @@ search_emails:
       selector:
         config_entry:
           integration: email_ha
+    sort_by:
+      name: Sort by
+      description: >
+        Newest received uses mailbox arrival order. Newest email date uses the
+        message Date header (up to 250 matches; narrow broader searches).
+      default: received
+      selector:
+        select:
+          options:
+            - label: Newest received
+              value: received
+            - label: Newest email date
+              value: date
     folder:
       name: Folder
       description: IMAP folder to search. UIDs are only valid in this folder.
